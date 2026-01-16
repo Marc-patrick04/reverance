@@ -10,9 +10,9 @@ if (!isLoggedIn() || !isAdmin()) {
 $singerCount = $pdo->query("SELECT COUNT(*) FROM singers WHERE status = 'Active'")->fetchColumn();
 $totalSingers = $pdo->query("SELECT COUNT(*) FROM singers")->fetchColumn();
 $inactiveSingers = $pdo->query("SELECT COUNT(*) FROM singers WHERE status = 'Inactive'")->fetchColumn();
-$groupCount = $pdo->query("SELECT COUNT(*) FROM groups WHERE is_published = 1")->fetchColumn();
+$groupCount = $pdo->query("SELECT COUNT(*) FROM groups WHERE is_published = true")->fetchColumn();
 $totalGroups = $pdo->query("SELECT COUNT(*) FROM groups")->fetchColumn();
-$logCount = $pdo->query("SELECT COUNT(*) FROM logs WHERE DATE(created_at) = CURDATE()")->fetchColumn();
+$logCount = $pdo->query("SELECT COUNT(*) FROM logs WHERE DATE(created_at) = CURRENT_DATE")->fetchColumn();
 $totalLogs = $pdo->query("SELECT COUNT(*) FROM logs")->fetchColumn();
 
 // Voice category breakdown
@@ -42,7 +42,7 @@ $recentGroups = $pdo->query("
 
 // System health
 $imagesCount = $pdo->query("SELECT COUNT(*) FROM landing_images")->fetchColumn();
-$activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active = 1")->fetchColumn();
+$activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active = true")->fetchColumn();
 
 
 ?>

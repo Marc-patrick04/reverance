@@ -7,7 +7,7 @@ if (!isLoggedIn()) {
 }
 
 // Get current published groups
-$publishedGroups = $pdo->query("SELECT * FROM groups WHERE is_published = 1 ORDER BY created_at DESC")->fetchAll();
+$publishedGroups = $pdo->query("SELECT * FROM groups WHERE is_published = true ORDER BY created_at DESC")->fetchAll();
 
 $groupsData = [];
 if (!empty($publishedGroups)) {

@@ -130,7 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Get published groups
-$publishedGroups = $pdo->query("SELECT * FROM groups WHERE is_published = 1 ORDER BY created_at DESC")->fetchAll();
+$publishedGroups = $pdo->query("SELECT * FROM groups WHERE is_published = true ORDER BY created_at DESC")->fetchAll();
 
 // Get all groups for history
 $allGroups = $pdo->query("SELECT g.*, u.username as creator FROM groups g LEFT JOIN users u ON g.created_by = u.id ORDER BY g.created_at DESC LIMIT 20")->fetchAll();

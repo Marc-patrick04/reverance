@@ -29,9 +29,9 @@ $stmt->execute();
 $logs = $stmt->fetchAll();
 
 // Get log statistics
-$todayLogs = $pdo->query("SELECT COUNT(*) FROM logs WHERE DATE(created_at) = CURDATE()")->fetchColumn();
-$thisWeekLogs = $pdo->query("SELECT COUNT(*) FROM logs WHERE YEARWEEK(created_at) = YEARWEEK(CURDATE())")->fetchColumn();
-$thisMonthLogs = $pdo->query("SELECT COUNT(*) FROM logs WHERE YEAR(created_at) = YEAR(CURDATE()) AND MONTH(created_at) = MONTH(CURDATE())")->fetchColumn();
+$todayLogs = $pdo->query("SELECT COUNT(*) FROM logs WHERE DATE(created_at) = CURRENT_DATE")->fetchColumn();
+$thisWeekLogs = $pdo->query("SELECT COUNT(*) FROM logs WHERE DATE_TRUNC('week', created_at) = DATE_TRUNC('week', CURRENT_DATE)")->fetchColumn();
+$thisMonthLogs = $pdo->query("SELECT COUNT(*) FROM logs WHERE EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(MONTH FROM created_at) = EXTRACT(MONTH FROM CURRENT_DATE)")->fetchColumn();
 
 // Get most active users
 $activeUsers = $pdo->query("

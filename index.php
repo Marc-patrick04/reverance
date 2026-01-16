@@ -11,7 +11,7 @@ $publishedGroups = [];
 $allGroups = [];
 
 try {
-    $stmt = $pdo->query("SELECT * FROM groups WHERE is_published = 1 ORDER BY created_at DESC");
+    $stmt = $pdo->query("SELECT * FROM groups WHERE is_published = true ORDER BY created_at DESC");
     $publishedGroups = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     if (!empty($publishedGroups)) {
@@ -24,7 +24,7 @@ try {
             FROM group_assignments ga
             JOIN groups g ON ga.group_id = g.id
             JOIN singers s ON ga.singer_id = s.id
-            WHERE g.id IN ($placeholders) AND g.is_published = 1
+            WHERE g.id IN ($placeholders) AND g.is_published = true
             ORDER BY g.service_date DESC, g.name, s.voice_category, s.voice_level DESC
         ");
         $stmt->execute($groupIds);
@@ -38,7 +38,7 @@ try {
 // Get active landing images for background slideshow
 $backgroundImages = [];
 try {
-    $stmt = $pdo->query("SELECT image_path FROM landing_images WHERE is_active = 1 ORDER BY created_at DESC");
+    $stmt = $pdo->query("SELECT image_path FROM landing_images WHERE is_active = true ORDER BY created_at DESC");
     $images = $stmt->fetchAll(PDO::FETCH_ASSOC);
     foreach ($images as $image) {
         // Convert admin-relative path to root-relative path
