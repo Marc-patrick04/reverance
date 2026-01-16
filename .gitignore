@@ -1,0 +1,43 @@
+# Environment variables and secrets
+.env
+.env.local
+.env.production
+
+# Database credentials (if using local config)
+config.local.php
+
+# Uploads (for local development - production uses persistent storage)
+# uploads/
+
+# Logs
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Composer
+vendor/
+
+# Node.js (if added later)
+node_modules/
+npm-debug.log*
+
+# PHP
+.phpunit.result.cache
+
+# Temporary files
+tmp/
+temp/

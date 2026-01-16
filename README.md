@@ -32,22 +32,25 @@ A comprehensive web-based system for managing gospel choir singers and creating 
 
 ## System Requirements
 
-- PHP 7.4 or higher
-- MySQL 5.7 or higher
-- Web server (Apache/Nginx)
+- PHP 8.0 or higher
+- PostgreSQL 12 or higher (for production)
+- Web server (Apache/Nginx) or cloud platform (Render, Heroku, etc.)
 - Modern web browser
 
 ## Installation
 
+### Local Development
+
 1. **Clone or download** the project files to your web server directory
-2. **Set up database**:
-   - Create a MySQL database
+2. **Set up PostgreSQL database**:
+   - Create a PostgreSQL database
    - Run the setup script: `http://your-domain/setup.php`
    - Or manually create tables using the SQL in `setup.php`
 
 3. **Configure database connection** in `includes/config.php`:
    ```php
    define('DB_HOST', 'localhost');
+   define('DB_PORT', '5432');
    define('DB_NAME', 'your_database_name');
    define('DB_USER', 'your_username');
    define('DB_PASS', 'your_password');
@@ -61,6 +64,29 @@ A comprehensive web-based system for managing gospel choir singers and creating 
 
 5. **Access the system**:
    - Main site: `http://your-domain/`
+   - Default admin login: `admin` / `admin123`
+
+### Render Deployment (Recommended)
+
+1. **Fork or clone** this repository to your GitHub account
+2. **Create a new PostgreSQL database** on Render:
+   - Go to Render Dashboard → PostgreSQL → Create
+   - Note the connection details
+
+3. **Deploy the web service**:
+   - Go to Render Dashboard → Web Service → Connect GitHub
+   - Select your repository
+   - Use the provided `render.yaml` configuration
+   - Set environment variables:
+     - `DATABASE_URL`: Your PostgreSQL connection string
+   - Deploy the service
+
+4. **Initialize the database**:
+   - Access your deployed app
+   - Run `/setup.php` to create tables and default admin user
+
+5. **Access the system**:
+   - Your Render app URL
    - Default admin login: `admin` / `admin123`
 
 ## Usage
