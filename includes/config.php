@@ -1,8 +1,13 @@
 <?php
 // Database configuration (PostgreSQL) - Render deployment ready
 if (getenv('DATABASE_URL')) {
-    // Use the DATABASE_URL directly; PDO can parse it
-    $pdo = new PDO(getenv('DATABASE_URL'));
+    // Parse the DATABASE_URL (format: postgresql://user:pass@host:port/dbname)
+    $dbUrl = parse_url(getenv('DATABASE_URL'));
+    $pdo = new PDO(
+        "pgsql:host={$dbUrl['host']};port={$dbUrl['port']};dbname=" . ltrim($dbUrl['path'], '/'),
+        $dbUrl['user'],
+        $dbUrl['pass']
+    );
 } else {
     // Local development fallback
     $pdo = new PDO(

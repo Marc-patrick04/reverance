@@ -1,6 +1,7 @@
 services:
   - type: web
     name: reverence-worship-team
+    runtime: docker
     envVars:
       - key: DATABASE_URL
         sync: false # Set this in Render dashboard
