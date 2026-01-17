@@ -2,12 +2,24 @@
 // Database configuration (PostgreSQL) - Render deployment ready
 if (getenv('DATABASE_URL')) {
     // Parse the DATABASE_URL (format: postgresql://user:pass@host:port/dbname)
-    $dbUrl = parse_url(getenv('DATABASE_URL'));
-    $pdo = new PDO(
-        "pgsql:host={$dbUrl['host']};port={$dbUrl['port']};dbname=" . ltrim($dbUrl['path'], '/'),
-        $dbUrl['user'],
-        $dbUrl['pass']
-    );
+    $url = getenv('DATABASE_URL');
+    if (preg_match('/postgresql:\/\/([^:]+):([^@]+)@([^:\/]+):?(\d+)?\/(.+)/', $url, $matches)) {
+        $user = $matches[1];
+        $pass = $matches[2];
+        $host = $matches[3];
+        $port = $matches[4] ?: 5432;
+        $dbname = $matches[5];
+        $pdo = new PDO("pgsql:host=$host;port=$port;dbname=$dbname", $user, $pass);
+    } else {
+        // Fallback to parse_url if regex fails
+        $dbUrl = parse_url($url);
+        $host = $dbUrl['host'];
+        $port = $dbUrl['port'] ?? 5432;
+        $dbname = ltrim($dbUrl['path'], '/');
+        $user = $dbUrl['user'];
+        $pass = $dbUrl['pass'];
+        $pdo = new PDO("pgsql:host=$host;port=$port;dbname=$dbname", $user, $pass);
+    }
 } else {
     // Local development fallback
     $pdo = new PDO(
