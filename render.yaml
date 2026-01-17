@@ -1,9 +1,6 @@
 services:
   - type: web
     name: reverence-worship-team
-    runtime: php
-    buildCommand: "echo 'No build step required'"
-    startCommand: "php -S 0.0.0.0:$PORT -t ."
     envVars:
       - key: DATABASE_URL
         sync: false # Set this in Render dashboard
