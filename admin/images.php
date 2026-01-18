@@ -15,16 +15,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Check and create upload directory with proper permissions
             if (!is_dir($uploadDir)) {
-                if (!mkdir($uploadDir, 0755, true)) {
-                    $message = '❌ Failed to create upload directory. Please check permissions.';
+                // Try multiple approaches for cloud platforms
+                $created = false;
+
+                // Method 1: Standard mkdir
+                if (!$created && mkdir($uploadDir, 0755, true)) {
+                    $created = true;
+                }
+
+                // Method 2: Try with different permissions
+                if (!$created && mkdir($uploadDir, 0777, true)) {
+                    $created = true;
+                }
+
+                // Method 3: Check if directory already exists (might be created by build process)
+                if (!$created && is_dir($uploadDir)) {
+                    $created = true;
+                }
+
+                if (!$created) {
+                    $message = '❌ Failed to create upload directory. On Render, the uploads directory should be created during build. Please redeploy with the updated Dockerfile.';
                 }
             }
 
             // Verify directory is writable
-            if (!is_writable($uploadDir)) {
-                // Try to make it writable
-                if (!chmod($uploadDir, 0755)) {
-                    $message = '❌ Upload directory is not writable. Please check file permissions.';
+            if (empty($message) && !is_writable($uploadDir)) {
+                // Try multiple approaches
+                $madeWritable = false;
+
+                // Method 1: Try chmod
+                if (!$madeWritable && @chmod($uploadDir, 0755)) {
+                    $madeWritable = true;
+                }
+
+                // Method 2: Try different permissions
+                if (!$madeWritable && @chmod($uploadDir, 0777)) {
+                    $madeWritable = true;
+                }
+
+                // Method 3: Check if it's actually writable despite permissions
+                if (!$madeWritable && is_writable($uploadDir)) {
+                    $madeWritable = true;
+                }
+
+                if (!$madeWritable) {
+                    $message = '❌ Upload directory is not writable. On Render, ensure proper file permissions are set in your build process or Dockerfile. Try: mkdir -p uploads/images && chmod 755 uploads/images';
                 }
             }
 
