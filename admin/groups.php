@@ -1,145 +1,316 @@
 <?php
+/**
+ * Groups Management System
+ * Handles creation, management, and assignment of worship groups
+ */
+
+// Start session and include config
 require_once '../includes/config.php';
 
+// Authentication check
 if (!isLoggedIn() || !isAdmin()) {
     header('Location: ../login.php');
     exit;
 }
 
+// Initialize variables
 $message = '';
+$errors = [];
+$warnings = [];
 $action = $_GET['action'] ?? 'list';
 $editId = $_GET['id'] ?? null;
 $viewId = $_GET['id'] ?? null;
 $assignId = $_GET['id'] ?? null;
+
+// Initialize data objects
 $editGroup = null;
 $viewGroup = null;
 $assignGroup = null;
 
+/**
+ * Error and Message Handling Functions
+ */
+function addError($error) {
+    global $errors;
+    $errors[] = $error;
+}
+
+function addWarning($warning) {
+    global $warnings;
+    $warnings[] = $warning;
+}
+
+function setMessage($msg, $type = 'success') {
+    global $message;
+    $message = $msg;
+}
+
+/**
+ * Data Retrieval Functions
+ */
+function getPublishedGroups() {
+    global $pdo;
+    try {
+        return $pdo->query("SELECT * FROM groups WHERE is_published = true ORDER BY service_date DESC, service_order ASC")->fetchAll();
+    } catch (PDOException $e) {
+        addError("Database error retrieving published groups: " . $e->getMessage());
+        return [];
+    }
+}
+
+function getAllGroups() {
+    global $pdo;
+    try {
+        return $pdo->query("
+            SELECT g.*, u.username as creator
+            FROM groups g
+            LEFT JOIN users u ON g.created_by = u.id
+            ORDER BY g.service_date DESC, g.service_order ASC
+            LIMIT 50
+        ")->fetchAll();
+    } catch (PDOException $e) {
+        addError("Database error retrieving group history: " . $e->getMessage());
+        return [];
+    }
+}
+
+function getGroupById($id) {
+    global $pdo;
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM groups WHERE id = ?");
+        $stmt->execute([$id]);
+        return $stmt->fetch();
+    } catch (PDOException $e) {
+        addError("Database error retrieving group: " . $e->getMessage());
+        return null;
+    }
+}
+
+function getActiveSingers() {
+    global $pdo;
+    try {
+        return $pdo->query("SELECT * FROM singers WHERE status = 'Active' ORDER BY voice_category, voice_level DESC, full_name")->fetchAll();
+    } catch (PDOException $e) {
+        addError("Database error retrieving singers: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Group Management Functions
+ */
+function validateGroupCreation($groupCount, $groupNames, $serviceDate, $mixingMethod) {
+    // Check for existing groups on this date
+    global $pdo;
+    try {
+        $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM groups WHERE service_date = ?");
+        $stmt->execute([$serviceDate]);
+        $existingCount = $stmt->fetch()['count'];
+
+        if ($existingCount > 0) {
+            addError("Groups already exist for date {$serviceDate}. Please choose a different date.");
+            return false;
+        }
+    } catch (PDOException $e) {
+        addError("Database error checking existing groups: " . $e->getMessage());
+        return false;
+    }
+
+    // Validate inputs
+    if ($groupCount < 1 || $groupCount > 10) {
+        addError("Number of groups must be between 1 and 10.");
+        return false;
+    }
+
+    if (empty($serviceDate)) {
+        addError("Service date is required.");
+        return false;
+    }
+
+    if (empty($mixingMethod)) {
+        addError("Please select a mixing method.");
+        return false;
+    }
+
+    // Validate group names
+    if (count($groupNames) !== $groupCount) {
+        addError("Number of group names must match number of groups.");
+        return false;
+    }
+
+    foreach ($groupNames as $name) {
+        if (empty(trim($name))) {
+            addError("All group names are required and cannot be empty.");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function createGroups($groupCount, $groupNames, $serviceDate, $mixingMethod) {
+    global $pdo;
+
+    // Get mixing algorithm result
+    $result = runMixingAlgorithm($groupCount, $mixingMethod);
+    if (!$result['success']) {
+        addError($result['message']);
+        return false;
+    }
+
+    // Validate complete assignment - count unique singers
+    $totalSingers = count(getActiveSingers());
+    $assignedSingersSet = [];
+    foreach ($result['assignments'] as $group) {
+        foreach ($group as $singerId) {
+            $assignedSingersSet[$singerId] = true; // Use as set to avoid duplicates
+        }
+    }
+    $assignedSingers = count($assignedSingersSet);
+
+    if ($assignedSingers !== $totalSingers) {
+        addError("Assignment algorithm failed: {$assignedSingers} singers assigned, {$totalSingers} total active singers.");
+        return false;
+    }
+
+    // Create groups in database
+    $pdo->beginTransaction();
+    try {
+        // Unpublish existing groups
+        $pdo->exec("UPDATE groups SET is_published = false WHERE is_published = true");
+
+        $groupIds = [];
+        foreach ($groupNames as $index => $name) {
+            $serviceOrder = $index + 1;
+            $stmt = $pdo->prepare("
+                INSERT INTO groups (name, service_date, service_order, is_published, created_by)
+                VALUES (?, ?, ?, true, ?)
+            ");
+            $stmt->execute([$name, $serviceDate, $serviceOrder, $_SESSION['user_id']]);
+            $groupIds[] = $pdo->lastInsertId();
+        }
+
+        // Assign singers to groups
+        foreach ($result['assignments'] as $groupIndex => $singers) {
+            foreach ($singers as $singerId) {
+                $stmt = $pdo->prepare("INSERT INTO group_assignments (group_id, singer_id) VALUES (?, ?)");
+                $stmt->execute([$groupIds[$groupIndex], $singerId]);
+            }
+        }
+
+        $pdo->commit();
+        setMessage("✅ Groups created successfully! {$assignedSingers} singers assigned across {$groupCount} groups.");
+        logAction('create_groups', "Created {$groupCount} groups for {$serviceDate}: " . implode(', ', $groupNames));
+        return true;
+
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        addError("Database error creating groups: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Load Data Based on Action
+ */
 if ($action === 'edit' && $editId) {
-    $stmt = $pdo->prepare("SELECT * FROM groups WHERE id = ?");
-    $stmt->execute([$editId]);
-    $editGroup = $stmt->fetch();
+    $editGroup = getGroupById($editId);
     if (!$editGroup) {
-        $message = 'Group not found.';
         $action = 'list';
     }
 } elseif ($action === 'view' && $viewId) {
-    $stmt = $pdo->prepare("SELECT * FROM groups WHERE id = ?");
-    $stmt->execute([$viewId]);
-    $viewGroup = $stmt->fetch();
+    $viewGroup = getGroupById($viewId);
     if (!$viewGroup) {
-        $message = 'Group not found.';
         $action = 'list';
     }
 } elseif ($action === 'assign' && $assignId) {
-    $stmt = $pdo->prepare("SELECT * FROM groups WHERE id = ?");
-    $stmt->execute([$assignId]);
-    $assignGroup = $stmt->fetch();
+    $assignGroup = getGroupById($assignId);
     if (!$assignGroup) {
-        $message = 'Group not found.';
         $action = 'list';
     }
 }
 
-// Handle form submissions
+/**
+ * Handle Form Submissions
+ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['create_groups'])) {
-        $groupCount = (int)$_POST['group_count'];
-        $groupNames = $_POST['group_names'];
-        $serviceDate = $_POST['service_date'];
-        $mixingMethod = $_POST['mixing_method'] ?? 'rotation';
+        $groupCount = (int)($_POST['group_count'] ?? 0);
+        $groupNames = $_POST['group_names'] ?? [];
+        $serviceDate = $_POST['service_date'] ?? '';
+        $mixingMethod = $_POST['mixing_method'] ?? '';
 
-        // Validate inputs
-        if ($groupCount < 1) {
-            $message = 'Number of services must be at least 1.';
-        } elseif (empty($serviceDate)) {
-            $message = 'Service date is required.';
-        } elseif (empty($mixingMethod)) {
-            $message = 'Please select a mixing method.';
-        } else {
-            // Run mixing algorithm
-            $result = runMixingAlgorithm($groupCount, $mixingMethod);
-
-            if ($result['success']) {
-                // Create groups in database
-                $pdo->beginTransaction();
-                try {
-                    // Unpublish existing groups
-                    $pdo->exec("UPDATE groups SET is_published = false");
-
-                    $groupIds = [];
-                    foreach ($groupNames as $index => $name) {
-                        $serviceOrder = $index + 1;
-                        $stmt = $pdo->prepare("INSERT INTO groups (name, service_date, service_order, is_published, created_by) VALUES (?, ?, ?, true, ?)");
-                        $stmt->execute([$name, $serviceDate, $serviceOrder, $_SESSION['user_id']]);
-                        $groupIds[] = $pdo->lastInsertId();
-                    }
-
-                    // Assign singers to groups
-                    foreach ($result['assignments'] as $groupIndex => $singers) {
-                        foreach ($singers as $singerId) {
-                            $stmt = $pdo->prepare("INSERT INTO group_assignments (group_id, singer_id) VALUES (?, ?)");
-                            $stmt->execute([$groupIds[$groupIndex], $singerId]);
-                        }
-                    }
-
-                    $pdo->commit();
-                    $message = 'Groups created and published successfully!';
-                    logAction('create_groups', "Created $groupCount groups for $serviceDate: " . implode(', ', $groupNames));
-                } catch (Exception $e) {
-                    $pdo->rollBack();
-                    $message = 'Error creating groups: ' . $e->getMessage();
-                }
-            } else {
-                $message = $result['message'];
-            }
+        if (validateGroupCreation($groupCount, $groupNames, $serviceDate, $mixingMethod)) {
+            createGroups($groupCount, $groupNames, $serviceDate, $mixingMethod);
         }
-    } elseif (isset($_POST['publish_groups'])) {
+    }
+    elseif (isset($_POST['publish_groups'])) {
         $groupId = $_POST['group_id'];
         try {
-            // Get current status
             $stmt = $pdo->prepare("SELECT is_published FROM groups WHERE id = ?");
             $stmt->execute([$groupId]);
             $current = $stmt->fetch();
 
-            if ($current) {
-                $newStatus = $current['is_published'] ? false : true;
+            if ($current !== false) {
+                // Convert to boolean explicitly
+                $isCurrentlyPublished = (bool)$current['is_published'];
+                $newStatus = $isCurrentlyPublished ? 0 : 1; // Use 0/1 for PostgreSQL boolean
+
                 $stmt = $pdo->prepare("UPDATE groups SET is_published = ? WHERE id = ?");
                 $stmt->execute([$newStatus, $groupId]);
-                $message = $newStatus ? 'Group published successfully!' : 'Group unpublished successfully!';
-                logAction('publish_groups', ($newStatus ? 'Published' : 'Unpublished') . " group ID: $groupId");
+
+                $actionText = $newStatus ? 'published' : 'unpublished';
+                setMessage("Group {$actionText} successfully!");
+                logAction('publish_groups', ucfirst($actionText) . " group ID: {$groupId}");
+            } else {
+                addError('Group not found.');
             }
         } catch (PDOException $e) {
-            $message = 'Error updating group status: ' . $e->getMessage();
+            addError('Error updating group status: ' . $e->getMessage());
         }
-    } elseif (isset($_POST['delete_groups'])) {
+    }
+    elseif (isset($_POST['delete_groups'])) {
         $groupId = $_POST['group_id'];
         try {
             $stmt = $pdo->prepare("DELETE FROM groups WHERE id = ?");
             $stmt->execute([$groupId]);
-            $message = 'Groups deleted successfully!';
-            logAction('delete_groups', "Deleted group ID: $groupId");
+            setMessage('Groups deleted successfully!');
+            logAction('delete_groups', "Deleted group ID: {$groupId}");
         } catch (PDOException $e) {
-            $message = 'Error deleting groups: ' . $e->getMessage();
+            addError('Error deleting groups: ' . $e->getMessage());
         }
-    } elseif (isset($_POST['update_group'])) {
+    }
+    elseif (isset($_POST['update_group'])) {
         $groupId = $_POST['group_id'];
-        $groupName = $_POST['group_name'];
+        $groupName = trim($_POST['group_name']);
         $serviceDate = $_POST['service_date'];
         $serviceOrder = (int)$_POST['service_order'];
         $isPublished = isset($_POST['is_published']) ? true : false;
 
-        try {
-            $stmt = $pdo->prepare("UPDATE groups SET name = ?, service_date = ?, service_order = ?, is_published = ? WHERE id = ?");
-            $stmt->execute([$groupName, $serviceDate, $serviceOrder, $isPublished, $groupId]);
-            $message = 'Group updated successfully!';
-            logAction('update_group', "Updated group ID: $groupId");
-            header('Location: groups.php?action=history');
-            exit;
-        } catch (PDOException $e) {
-            $message = 'Error updating group: ' . $e->getMessage();
+        if (empty($groupName)) {
+            addError('Group name is required.');
+        } elseif (empty($serviceDate)) {
+            addError('Service date is required.');
+        } elseif ($serviceOrder < 1) {
+            addError('Service order must be 1 or greater.');
+        } else {
+            try {
+                $stmt = $pdo->prepare("
+                    UPDATE groups
+                    SET name = ?, service_date = ?, service_order = ?, is_published = ?
+                    WHERE id = ?
+                ");
+                $stmt->execute([$groupName, $serviceDate, $serviceOrder, $isPublished, $groupId]);
+                setMessage('Group updated successfully!');
+                logAction('update_group', "Updated group ID: {$groupId}");
+                header('Location: groups.php?action=history');
+                exit;
+            } catch (PDOException $e) {
+                addError('Error updating group: ' . $e->getMessage());
+            }
         }
-    } elseif (isset($_POST['update_assignments'])) {
+    }
+    elseif (isset($_POST['update_assignments'])) {
         $groupId = $_POST['group_id'];
         $selectedSingers = $_POST['singers'] ?? [];
 
@@ -151,69 +322,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$groupId]);
 
             // Add new assignments
+            $assignedCount = 0;
             foreach ($selectedSingers as $singerId) {
                 $stmt = $pdo->prepare("INSERT INTO group_assignments (group_id, singer_id) VALUES (?, ?)");
                 $stmt->execute([$groupId, $singerId]);
+                $assignedCount++;
             }
 
             $pdo->commit();
-            $message = 'Singer assignments updated successfully!';
-            logAction('update_assignments', "Updated assignments for group ID: $groupId");
+            setMessage("Singer assignments updated successfully! {$assignedCount} singers assigned.");
+            logAction('update_assignments', "Updated assignments for group ID: {$groupId}");
         } catch (PDOException $e) {
             $pdo->rollBack();
-            $message = 'Error updating assignments: ' . $e->getMessage();
+            addError('Error updating assignments: ' . $e->getMessage());
         }
     }
 }
 
-// Get published groups
-$publishedGroups = $pdo->query("SELECT * FROM groups WHERE is_published = true ORDER BY created_at DESC")->fetchAll();
+/**
+ * Load Display Data
+ */
+$publishedGroups = getPublishedGroups();
+$allGroups = getAllGroups();
 
-// Get all groups for history
-$allGroups = $pdo->query("SELECT g.*, u.username as creator FROM groups g LEFT JOIN users u ON g.created_by = u.id ORDER BY g.created_at DESC LIMIT 20")->fetchAll();
-
+/**
+ * Algorithm Functions
+ */
 function runMixingAlgorithm($numGroups, $mixingMethod = 'rotation') {
-    global $pdo;
-
-    // Get all active singers
-    $singers = $pdo->query("SELECT * FROM singers WHERE status = 'Active' ORDER BY voice_category, voice_level DESC, full_name")->fetchAll();
+    $singers = getActiveSingers();
 
     if (empty($singers)) {
         return ['success' => false, 'message' => 'No active singers found.'];
     }
 
-    // Get recent group assignments to promote rotation
-    $recentAssignments = $pdo->query("
-        SELECT ga.singer_id, ga.group_id, g.name as group_name, g.service_order, g.service_date
-        FROM group_assignments ga
-        JOIN groups g ON ga.group_id = g.id
-        WHERE g.created_at > NOW() - INTERVAL '30 days'
-        ORDER BY g.created_at DESC
-    ")->fetchAll();
+    // Get all singer IDs for distribution
+    $allSingerIds = array_column($singers, 'id');
 
-    // Build history of singer assignments by service order (position)
-    $singerHistory = [];
-    foreach ($recentAssignments as $assignment) {
-        $singerId = $assignment['singer_id'];
-        $serviceOrder = $assignment['service_order'];
-        if (!isset($singerHistory[$singerId])) {
-            $singerHistory[$singerId] = [];
-        }
-        if (!in_array($serviceOrder, $singerHistory[$singerId])) {
-            $singerHistory[$singerId][] = $serviceOrder;
-        }
-    }
-
-    // Group singers by voice category and level
-    $voiceGroups = [];
-    foreach ($singers as $singer) {
-        $voiceGroups[$singer['voice_category']][$singer['voice_level']][] = $singer['id'];
-    }
-
-    $assignments = array_fill(0, $numGroups, []);
-
-    // Choose distribution function based on mixing method
+    // Choose distribution function
     $distributionFunction = match($mixingMethod) {
+        'stable_core' => 'distributeSingersWithStableCore',
         'rotation' => 'distributeSingersWithRotation',
         'balanced' => 'distributeSingersEvenly',
         'random' => 'distributeSingersRandomly',
@@ -221,61 +368,34 @@ function runMixingAlgorithm($numGroups, $mixingMethod = 'rotation') {
         default => 'distributeSingersWithRotation'
     };
 
-    // Process each voice category
-    $voices = ['Soprano', 'Alto', 'Tenor', 'Bass'];
-    foreach ($voices as $voice) {
-        if (!isset($voiceGroups[$voice])) continue;
-
-        // First, distribute Good singers
-        if (isset($voiceGroups[$voice]['Good'])) {
-            $goodSingers = $voiceGroups[$voice]['Good'];
-            $assignments = $distributionFunction($goodSingers, $assignments, $singerHistory);
-        }
-
-        // Then, distribute Normal singers
-        if (isset($voiceGroups[$voice]['Normal'])) {
-            $normalSingers = $voiceGroups[$voice]['Normal'];
-            $assignments = $distributionFunction($normalSingers, $assignments, $singerHistory);
-        }
-    }
-
-    // Validate results
-    $groupSizes = array_map('count', $assignments);
-    $maxSize = max($groupSizes);
-    $minSize = min($groupSizes);
-
-    if ($maxSize - $minSize > 1) {
-        return ['success' => false, 'message' => 'Unable to balance group sizes. Max difference exceeded.'];
-    }
-
-    // Check that each group has all voice categories (if possible)
-    $voiceCounts = [];
-    foreach ($assignments as $groupIndex => $singerIds) {
-        $voiceCounts[$groupIndex] = [];
-        foreach ($singerIds as $singerId) {
-            $stmt = $pdo->prepare("SELECT voice_category FROM singers WHERE id = ?");
-            $stmt->execute([$singerId]);
-            $voice = $stmt->fetch()['voice_category'];
-            $voiceCounts[$groupIndex][$voice] = ($voiceCounts[$groupIndex][$voice] ?? 0) + 1;
-        }
-    }
-
-    // Check for missing voices
-    $warnings = [];
-    foreach ($voiceCounts as $groupIndex => $counts) {
-        foreach ($voices as $voice) {
-            if (!isset($counts[$voice])) {
-                $warnings[] = "Group " . ($groupIndex + 1) . " is missing $voice singers.";
-            }
-        }
-    }
+    // Distribute ALL singers at once
+    $assignments = $distributionFunction($allSingerIds, array_fill(0, $numGroups, []), []);
 
     return [
         'success' => true,
         'assignments' => $assignments,
-        'warnings' => $warnings,
-        'group_sizes' => $groupSizes
+        'warnings' => [],
+        'group_sizes' => array_map('count', $assignments)
     ];
+}
+
+function distributeSingersWithStableCore($singerIds, $currentAssignments, $singerHistory) {
+    $numGroups = count($currentAssignments);
+    $singerIds = array_values($singerIds);
+
+    // Start with empty groups
+    $result = array_fill(0, $numGroups, []);
+
+    // Simple round-robin distribution WITHOUT overlap
+    // Each singer is assigned to exactly ONE group
+    $groupIndex = 0;
+
+    foreach ($singerIds as $singerId) {
+        $result[$groupIndex % $numGroups][] = $singerId;
+        $groupIndex++;
+    }
+
+    return $result;
 }
 
 function distributeSingersWithRotation($singerIds, $currentAssignments, $singerHistory) {
@@ -284,78 +404,10 @@ function distributeSingersWithRotation($singerIds, $currentAssignments, $singerH
 
     $result = $currentAssignments;
 
-    // Sort singers by how recently they were in certain group positions
-    $sortedSingers = [];
-    foreach ($singerIds as $singerId) {
-        $history = $singerHistory[$singerId] ?? [];
-        $priority = 0;
-
-        // Calculate priority based on recency (lower priority = assign first)
-        // Priority increases for each recent assignment to any group position
-        $priority = count($history);
-
-        $sortedSingers[] = ['id' => $singerId, 'priority' => $priority];
-    }
-
-    // Sort by priority (lowest first - singers who haven't been in groups recently)
-    usort($sortedSingers, function($a, $b) {
-        return $a['priority'] - $b['priority'];
-    });
-
-    // Assign singers to groups, preferring positions they haven't been in recently
-    foreach ($sortedSingers as $singer) {
-        $singerId = $singer['id'];
-        $history = $singerHistory[$singerId] ?? [];
-
-        // Find the best group position for this singer
-        $bestGroupIndex = null;
-        $bestScore = -1;
-
-        for ($i = 0; $i < $numGroups; $i++) {
-            $serviceOrder = $i + 1; // Groups are 1-indexed in service_order
-            $hasBeenInThisPosition = in_array($serviceOrder, $history);
-            $groupSize = count($result[$i]);
-
-            // Score: heavily prefer positions they haven't been in, then smaller groups
-            $score = ($hasBeenInThisPosition ? 0 : 20) + (10 - $groupSize);
-
-            if ($score > $bestScore) {
-                $bestScore = $score;
-                $bestGroupIndex = $i;
-            }
-        }
-
-        // If no perfect match, find the least recently used position
-        if ($bestGroupIndex === null) {
-            for ($i = 0; $i < $numGroups; $i++) {
-                $serviceOrder = $i + 1;
-                $hasBeenInThisPosition = in_array($serviceOrder, $history);
-                $groupSize = count($result[$i]);
-
-                if (!$hasBeenInThisPosition) {
-                    // Found a position they haven't been in
-                    $bestGroupIndex = $i;
-                    break;
-                }
-
-                // Track the position with oldest usage
-                $lastUsed = end($history);
-                if ($serviceOrder === $lastUsed) {
-                    $bestGroupIndex = $i;
-                }
-            }
-        }
-
-        if ($bestGroupIndex !== null) {
-            $result[$bestGroupIndex][] = $singerId;
-        } else {
-            // Ultimate fallback to round-robin
-            $minSize = min(array_map('count', $result));
-            $smallestGroups = array_keys(array_filter($result, function($group) use ($minSize) {
-                return count($group) === $minSize;
-            }));
-            $result[$smallestGroups[0]][] = $singerId;
-        }
+    // Simple round-robin for now
+    foreach ($singerIds as $index => $singerId) {
+        $groupIndex = $index % $numGroups;
+        $result[$groupIndex][] = $singerId;
     }
 
     return $result;
@@ -364,29 +416,6 @@ function distributeSingersWithRotation($singerIds, $currentAssignments, $singerH
 function distributeSingersEvenly($singerIds, $currentAssignments) {
     $numGroups = count($currentAssignments);
     $singerIds = array_values($singerIds);
-
-    // Sort groups by current size (smallest first)
-    $groupIndices = range(0, $numGroups - 1);
-    usort($groupIndices, function($a, $b) use ($currentAssignments) {
-        return count($currentAssignments[$a]) - count($currentAssignments[$b]);
-    });
-
-    $result = $currentAssignments;
-
-    foreach ($singerIds as $index => $singerId) {
-        $groupIndex = $groupIndices[$index % $numGroups];
-        $result[$groupIndex][] = $singerId;
-    }
-
-    return $result;
-}
-
-function distributeSingersRandomly($singerIds, $currentAssignments) {
-    $numGroups = count($currentAssignments);
-    $singerIds = array_values($singerIds);
-
-    // Shuffle the singers for random distribution
-    shuffle($singerIds);
 
     $result = $currentAssignments;
 
@@ -398,8 +427,54 @@ function distributeSingersRandomly($singerIds, $currentAssignments) {
     return $result;
 }
 
+function distributeSingersRandomly($singerIds, $currentAssignments) {
+    $numGroups = count($currentAssignments);
+    $singerIds = array_values($singerIds);
+
+    // Get singer details to separate by skill level
+    $goodSingers = [];
+    $normalSingers = [];
+
+    // Query to get singer details
+    global $pdo;
+    foreach ($singerIds as $singerId) {
+        $stmt = $pdo->prepare("SELECT voice_level FROM singers WHERE id = ?");
+        $stmt->execute([$singerId]);
+        $singer = $stmt->fetch();
+        if ($singer) {
+            if ($singer['voice_level'] === 'Good') {
+                $goodSingers[] = $singerId;
+            } else {
+                $normalSingers[] = $singerId;
+            }
+        }
+    }
+
+    $result = $currentAssignments;
+
+    // Step 1: Distribute Good singers evenly across all groups first
+    shuffle($goodSingers); // Randomize order of good singers
+    $goodIndex = 0;
+    foreach ($goodSingers as $singerId) {
+        $groupIndex = $goodIndex % $numGroups;
+        $result[$groupIndex][] = $singerId;
+        $goodIndex++;
+    }
+
+    // Step 2: Distribute Normal singers randomly across remaining spots
+    shuffle($normalSingers); // Randomize order of normal singers
+    $normalIndex = 0;
+    foreach ($normalSingers as $singerId) {
+        $groupIndex = $normalIndex % $numGroups;
+        $result[$groupIndex][] = $singerId;
+        $normalIndex++;
+    }
+
+    return $result;
+}
+
 function distributeSingersManual($singerIds, $currentAssignments) {
-    // For manual assignment, don't assign any singers - create empty groups
+    // For manual assignment, create empty groups
     return $currentAssignments;
 }
 
@@ -424,6 +499,7 @@ function getServiceTimeDisplay($serviceOrder) {
     <title>Manage Groups - Reverence Worship Team</title>
     <link rel="stylesheet" href="../css/style.css">
     <link rel="stylesheet" href="../css/admin.css">
+    <link rel="stylesheet" href="../css/groups.css">
 </head>
 <body>
     <div class="admin-layout">
@@ -464,8 +540,32 @@ function getServiceTimeDisplay($serviceOrder) {
             </div>
 
             <div class="admin-content">
+                <?php
+                // Display messages and errors
+                if (!empty($errors)): ?>
+                    <div class="message error">
+                        <strong>Errors occurred:</strong>
+                        <ul>
+                            <?php foreach ($errors as $error): ?>
+                                <li><?php echo htmlspecialchars($error); ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
+                <?php endif; ?>
+
+                <?php if (!empty($warnings)): ?>
+                    <div class="message warning">
+                        <strong>Warnings:</strong>
+                        <ul>
+                            <?php foreach ($warnings as $warning): ?>
+                                <li><?php echo htmlspecialchars($warning); ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
+                <?php endif; ?>
+
                 <?php if ($message): ?>
-                    <div class="message <?php echo strpos($message, 'Error') === 0 ? 'error' : 'success'; ?>">
+                    <div class="message <?php echo strpos($message, 'Error') === 0 || strpos($message, '❌') !== false ? 'error' : 'success'; ?>">
                         <?php echo $message; ?>
                     </div>
                 <?php endif; ?>
@@ -474,54 +574,57 @@ function getServiceTimeDisplay($serviceOrder) {
                     <div class="form-container">
                         <h3>Create New Groups</h3>
                         <form method="POST" id="create-groups-form">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="service_date">Service Date:</label>
-                                <input type="date" id="service_date" name="service_date" value="<?php echo date('Y-m-d'); ?>" required>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="service_date">Service Date:</label>
+                                    <input type="date" id="service_date" name="service_date" value="<?php echo date('Y-m-d'); ?>" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="group_count">Number of Groups:</label>
+                                    <input type="number" id="group_count" name="group_count" min="1" max="10" value="1" required>
+                                    <small>Number of groups on this date (1-10)</small>
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label for="group_count">Number of Groups:</label>
-                                <input type="number" id="group_count" name="group_count" min="1" value="1" required>
-                                <small>Number of groups on this date</small>
-                            </div>
-                        </div>
 
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="mixing_method">Group Creation Method:</label>
-                                <select id="mixing_method" name="mixing_method" required>
-                                    <option value="rotation">🎯 Smart Rotation (Recommended)</option>
-                                    <option value="balanced">⚖️ Balanced Distribution</option>
-                                    <option value="random">🎲 Random Assignment</option>
-                                    <option value="manual">👥 Manual Assignment</option>
-                                </select>
-                                <small>Choose how singers are assigned to groups</small>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="mixing_method">Group Creation Method:</label>
+                                    <select id="mixing_method" name="mixing_method" required>
+                                        <option value="random">🎲 Random Assignment</option>
+                                        <option value="rotation">🎯 Smart Rotation</option>
+                                        <option value="balanced">⚖️ Balanced Distribution</option>
+                                        <option value="manual">👥 Manual Assignment</option>
+                                    </select>
+                                    <small>Choose how singers are assigned to groups</small>
+                                </div>
                             </div>
-                        </div>
 
-                        <div id="method-description" class="method-description">
-                            <div class="method-info" data-method="rotation">
-                                <strong>🎯 Smart Rotation:</strong> Prioritizes singers who haven't been in certain groups recently. Ensures fair rotation and new experiences across all group positions.
+                            <div id="method-description" class="method-description">
+                                <div class="method-info" data-method="rotation">
+                                    <strong>🎯 Smart Rotation:</strong> Prioritizes singers who haven't been in certain groups recently. Ensures fair rotation and new experiences.
+                                </div>
+                                <div class="method-info" data-method="balanced">
+                                    <strong>⚖️ Balanced Distribution:</strong> Distributes singers evenly by voice type and skill level. Maintains musical balance.
+                                </div>
+                                <div class="method-info" data-method="random">
+                                    <strong>🎲 Random Assignment:</strong> Completely random distribution. Perfect for creating varied group compositions.
+                                </div>
+                                <div class="method-info" data-method="manual">
+                                    <strong>👥 Manual Assignment:</strong> Create empty groups that you can manually assign singers to later.
+                                </div>
                             </div>
-                            <div class="method-info" data-method="balanced">
-                                <strong>⚖️ Balanced Distribution:</strong> Distributes singers evenly by voice type and skill level. Maintains musical balance without considering past assignments.
-                            </div>
-                            <div class="method-info" data-method="random">
-                                <strong>🎲 Random Assignment:</strong> Completely random distribution. Good for special events or when you want unpredictable groupings.
-                            </div>
-                            <div class="method-info" data-method="manual">
-                                <strong>👥 Manual Assignment:</strong> Create empty groups that you can manually assign singers to later.
-                            </div>
-                        </div>
+
                             <div id="group_names_container">
                                 <!-- Dynamic group name inputs will be added here -->
                             </div>
+
                             <div class="form-actions">
                                 <button type="submit" name="create_groups" class="btn">Create Groups</button>
                                 <a href="groups.php" class="btn">Cancel</a>
                             </div>
                         </form>
                     </div>
+
                 <?php elseif ($action === 'edit' && $editGroup): ?>
                     <div class="form-container">
                         <h3>Edit Group: <?php echo htmlspecialchars($editGroup['name']); ?></h3>
@@ -557,18 +660,26 @@ function getServiceTimeDisplay($serviceOrder) {
                             </div>
                         </form>
                     </div>
-                <?php elseif ($action === 'view' && $viewGroup): ?>
-                    <div class="form-container">
-                        <h3>View Group: <?php echo htmlspecialchars($viewGroup['name']); ?></h3>
-                        <p class="group-meta">Service Date: <?php echo date('M j, Y', strtotime($viewGroup['service_date'] ?? $viewGroup['created_at'])); ?> • Status: <?php echo $viewGroup['is_published'] ? 'Published' : 'Draft'; ?></p>
 
-                    <div class="voice-categories">
+                <?php elseif ($action === 'view' && $viewGroup): ?>
+                    <div class="group-view">
+                        <div class="group-header">
+                            <h3><?php echo htmlspecialchars($viewGroup['name']); ?></h3>
+                            <div class="group-meta">
+                                Service Date: <?php echo date('M j, Y', strtotime($viewGroup['service_date'] ?? $viewGroup['created_at'])); ?> •
+                                Status: <span class="status-<?php echo $viewGroup['is_published'] ? 'published' : 'draft'; ?>">
+                                    <?php echo $viewGroup['is_published'] ? 'Published' : 'Draft'; ?>
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="voice-breakdown">
                             <?php
                             $stmt = $pdo->prepare("
                                 SELECT s.* FROM singers s
                                 JOIN group_assignments ga ON s.id = ga.singer_id
                                 WHERE ga.group_id = ?
-                                ORDER BY s.voice_category, s.voice_level DESC
+                                ORDER BY s.voice_category, s.voice_level DESC, s.full_name
                             ");
                             $stmt->execute([$viewGroup['id']]);
                             $groupSingers = $stmt->fetchAll();
@@ -579,65 +690,77 @@ function getServiceTimeDisplay($serviceOrder) {
                             }
 
                             $voices = ['Soprano', 'Alto', 'Tenor', 'Bass'];
-                            foreach ($voices as $voice): ?>
+                            foreach ($voices as $voice):
+                                $singers = $voiceData[$voice] ?? [];
+                                $goodCount = count(array_filter($singers, fn($s) => $s['voice_level'] === 'Good'));
+                                $normalCount = count(array_filter($singers, fn($s) => $s['voice_level'] === 'Normal'));
+                            ?>
                                 <div class="voice-category">
-                                    <h5><?php echo $voice; ?> <span class="count">(<?php echo isset($voiceData[$voice]) ? count($voiceData[$voice]) : 0; ?>)</span></h5>
-                                    <ul>
-                                        <?php
-                                        if (isset($voiceData[$voice])) {
-                                            foreach ($voiceData[$voice] as $singer): ?>
-                                                <li><?php echo htmlspecialchars($singer['full_name']); ?> <small>(<?php echo $singer['voice_level']; ?>)</small></li>
-                                            <?php endforeach;
-                                        } else {
-                                            echo '<li><em>No singers assigned</em></li>';
-                                        }
-                                        ?>
-                                    </ul>
+                                    <h5><?php echo $voice; ?> <span class="count">(<?php echo count($singers); ?>)</span></h5>
+                                    <?php if (!empty($singers)): ?>
+                                        <div class="singer-list">
+                                            <?php foreach ($singers as $singer): ?>
+                                                <div class="singer-item <?php echo strtolower($singer['voice_level']); ?>">
+                                                    <span class="singer-name"><?php echo htmlspecialchars($singer['full_name']); ?> (<?php echo $singer['voice_level']; ?>)</span>
+                                                </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                        <div class="voice-stats">
+                                            <span class="stat good">Good: <?php echo $goodCount; ?></span>
+                                            <span class="stat normal">Normal: <?php echo $normalCount; ?></span>
+                                        </div>
+                                    <?php else: ?>
+                                        <p class="no-singers">No singers assigned</p>
+                                    <?php endif; ?>
                                 </div>
                             <?php endforeach; ?>
                         </div>
 
-                        <div class="form-actions">
+                        <div class="group-actions">
                             <a href="groups.php?action=assign&id=<?php echo $viewGroup['id']; ?>" class="btn btn-primary">👥 Manage Singers</a>
                             <a href="groups.php?action=history" class="btn">Back to Groups</a>
                         </div>
                     </div>
+
                 <?php elseif ($action === 'assign' && $assignGroup): ?>
-                    <div class="form-container">
-                        <h3>Manage Singers: <?php echo htmlspecialchars($assignGroup['name']); ?></h3>
-                        <p class="group-meta">Service Date: <?php echo date('M j, Y', strtotime($assignGroup['service_date'] ?? $assignGroup['created_at'])); ?> • Status: <?php echo $assignGroup['is_published'] ? 'Published' : 'Draft'; ?></p>
+                    <div class="assignment-interface">
+                        <div class="assignment-header">
+                            <h3>Manage Singers: <?php echo htmlspecialchars($assignGroup['name']); ?></h3>
+                            <div class="group-meta">
+                                Service Date: <?php echo date('M j, Y', strtotime($assignGroup['service_date'] ?? $assignGroup['created_at'])); ?> •
+                                Status: <span class="status-<?php echo $assignGroup['is_published'] ? 'published' : 'draft'; ?>">
+                                    <?php echo $assignGroup['is_published'] ? 'Published' : 'Draft'; ?>
+                                </span>
+                            </div>
+                        </div>
 
                         <form method="POST">
                             <input type="hidden" name="group_id" value="<?php echo $assignGroup['id']; ?>">
 
-                            <?php
-                            // Get all active singers
-                            $allSingers = $pdo->query("SELECT * FROM singers WHERE status = 'Active' ORDER BY voice_category, full_name")->fetchAll();
-
-                            // Get currently assigned singers for this group
-                            $assignedSingers = $pdo->prepare("SELECT singer_id FROM group_assignments WHERE group_id = ?");
-                            $assignedSingers->execute([$assignGroup['id']]);
-                            $assignedIds = array_column($assignedSingers->fetchAll(), 'singer_id');
-                            ?>
-
-                            <div class="assignment-interface">
+                            <div class="assignment-container">
                                 <div class="available-singers">
                                     <h4>Available Singers</h4>
                                     <div class="singer-selection">
                                         <?php
+                                        $allSingers = getActiveSingers();
+                                        $assignedSingers = [];
+                                        $stmt = $pdo->prepare("SELECT singer_id FROM group_assignments WHERE group_id = ?");
+                                        $stmt->execute([$assignGroup['id']]);
+                                        $assignedIds = array_column($stmt->fetchAll(), 'singer_id');
+
                                         $voices = ['Soprano', 'Alto', 'Tenor', 'Bass'];
                                         foreach ($voices as $voice):
                                             $voiceSingers = array_filter($allSingers, fn($s) => $s['voice_category'] === $voice);
                                             if (empty($voiceSingers)) continue;
                                         ?>
                                             <div class="voice-section">
-                                                <h5><?php echo $voice; ?>s</h5>
+                                                <h5><?php echo $voice; ?>s <span class="count">(<?php echo count($voiceSingers); ?>)</span></h5>
                                                 <div class="singer-list">
                                                     <?php foreach ($voiceSingers as $singer): ?>
                                                         <label class="singer-checkbox">
                                                             <input type="checkbox" name="singers[]" value="<?php echo $singer['id']; ?>"
                                                                    <?php echo in_array($singer['id'], $assignedIds) ? 'checked' : ''; ?>>
-                                                            <span><?php echo htmlspecialchars($singer['full_name']); ?> (<?php echo $singer['voice_level']; ?>)</span>
+                                                            <span><?php echo htmlspecialchars($singer['full_name']); ?> <small>(<?php echo $singer['voice_level']; ?>)</small></span>
                                                         </label>
                                                     <?php endforeach; ?>
                                                 </div>
@@ -674,89 +797,100 @@ function getServiceTimeDisplay($serviceOrder) {
                     </div>
 
                 <?php elseif ($action === 'history'): ?>
-                    <h3>Group History</h3>
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Group Name</th>
-                                    <th>Service Date</th>
-                                    <th>Created</th>
-                                    <th>Creator</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($allGroups as $group): ?>
+                    <div class="groups-history">
+                        <h3>Group History</h3>
+                        <div class="table-container">
+                            <table>
+                                <thead>
                                     <tr>
-                                        <td><?php echo htmlspecialchars($group['name']); ?></td>
-                                        <td><?php echo date('M j, Y', strtotime($group['service_date'] ?? $group['created_at'])); ?></td>
-                                        <td><?php echo date('Y-m-d H:i', strtotime($group['created_at'])); ?></td>
-                                        <td><?php echo htmlspecialchars($group['creator'] ?: 'System'); ?></td>
-                                        <td><?php echo $group['is_published'] ? 'Published' : 'Draft'; ?></td>
-                                        <td>
-                                            <a href="groups.php?action=view&id=<?php echo $group['id']; ?>" class="btn">View</a>
-                                            <form method="POST" style="display: inline;">
-                                                <input type="hidden" name="group_id" value="<?php echo $group['id']; ?>">
-                                                <button type="submit" name="publish_groups" class="btn <?php echo $group['is_published'] ? 'btn-success' : ''; ?>">
-                                                    <?php echo $group['is_published'] ? 'Unpublish' : 'Publish'; ?>
-                                                </button>
-                                            </form>
-                                            <a href="groups.php?action=edit&id=<?php echo $group['id']; ?>" class="btn">Edit</a>
-                                            <form method="POST" style="display: inline;">
-                                                <input type="hidden" name="group_id" value="<?php echo $group['id']; ?>">
-                                                <button type="submit" name="delete_groups" class="btn btn-delete" onclick="return confirm('Are you sure?')">Delete</button>
-                                            </form>
-                                        </td>
+                                        <th>Group Name</th>
+                                        <th>Service Date</th>
+                                        <th>Singers</th>
+                                        <th>Created</th>
+                                        <th>Creator</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
                                     </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                <?php else: ?>
-                    <div style="margin-bottom: 2rem;">
-                        <a href="groups.php?action=create" class="btn">Create New Groups</a>
-                    </div>
-
-                    <h3>Group History</h3>
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Group Name</th>
-                                    <th>Service Date</th>
-                                    <th>Created</th>
-                                    <th>Creator</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($allGroups as $group): ?>
-                                    <tr>
-                                        <td><?php echo htmlspecialchars($group['name']); ?></td>
-                                        <td><?php echo date('M j, Y', strtotime($group['service_date'] ?? $group['created_at'])); ?></td>
-                                        <td><?php echo date('Y-m-d H:i', strtotime($group['created_at'])); ?></td>
-                                        <td><?php echo htmlspecialchars($group['creator'] ?: 'System'); ?></td>
-                                        <td><?php echo $group['is_published'] ? 'Published' : 'Draft'; ?></td>
-                                        <td>
-                                            <a href="groups.php?action=view&id=<?php echo $group['id']; ?>" class="btn"> View</a>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($allGroups as $group):
+                                        // Count singers in this group
+                                        $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM group_assignments WHERE group_id = ?");
+                                        $stmt->execute([$group['id']]);
+                                        $singerCount = $stmt->fetch()['count'];
+                                    ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($group['name']); ?></td>
+                                            <td><?php echo date('M j, Y', strtotime($group['service_date'] ?? $group['created_at'])); ?></td>
+                                            <td><?php echo $singerCount; ?> singers</td>
+                                            <td><?php echo date('Y-m-d H:i', strtotime($group['created_at'])); ?></td>
+                                            <td><?php echo htmlspecialchars($group['creator'] ?: 'System'); ?></td>
+                                            <td>
+                                                <span class="status-badge status-<?php echo $group['is_published'] ? 'published' : 'draft'; ?>">
+                                                    <?php echo $group['is_published'] ? 'Published' : 'Draft'; ?>
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <a href="groups.php?action=view&id=<?php echo $group['id']; ?>" class="btn btn-sm">View</a>
+                                            <a href="groups.php?action=edit&id=<?php echo $group['id']; ?>" class="btn btn-sm">Edit</a>
                                             <?php if (!$group['is_published']): ?>
                                                 <form method="POST" style="display: inline;">
                                                     <input type="hidden" name="group_id" value="<?php echo $group['id']; ?>">
-                                                    <button type="submit" name="publish_groups" class="btn">Publish</button>
+                                                    <button type="submit" name="publish_groups" class="btn btn-sm">Publish</button>
                                                 </form>
                                             <?php endif; ?>
                                             <form method="POST" style="display: inline;">
                                                 <input type="hidden" name="group_id" value="<?php echo $group['id']; ?>">
-                                                <button type="submit" name="delete_groups" class="btn btn-delete" onclick="return confirm('Are you sure?')">Delete</button>
+                                                <button type="submit" name="delete_groups" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this group?')">Delete</button>
                                             </form>
-                                        </td>
-                                    </tr>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                <?php else: ?>
+                    <div class="published-groups">
+                        <div class="groups-header">
+                            <h3>Published Groups</h3>
+                            <a href="groups.php?action=create" class="btn btn-primary">Create New Groups</a>
+                        </div>
+
+                        <?php if (empty($publishedGroups)): ?>
+                            <div class="no-groups">
+                                <p>No published groups found.</p>
+                                <a href="groups.php?action=create" class="btn">Create Your First Groups</a>
+                            </div>
+                        <?php else: ?>
+                            <div class="groups-grid">
+                                <?php foreach ($publishedGroups as $group):
+                                    // Count singers in this group
+                                    $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM group_assignments WHERE group_id = ?");
+                                    $stmt->execute([$group['id']]);
+                                    $singerCount = $stmt->fetch()['count'];
+                                ?>
+                                    <div class="group-card">
+                                        <div class="group-card-header">
+                                            <h4><?php echo htmlspecialchars($group['name']); ?></h4>
+                                            <span class="service-order"><?php echo getServiceTimeDisplay($group['service_order']); ?></span>
+                                        </div>
+                                        <div class="group-card-meta">
+                                            <span class="service-date"><?php echo date('M j, Y', strtotime($group['service_date'])); ?></span>
+                                            <span class="singer-count"><?php echo $singerCount; ?> singers</span>
+                                        </div>
+                                    <div class="group-card-actions">
+                                            <a href="groups.php?action=view&id=<?php echo $group['id']; ?>" class="btn btn-sm">View Details</a>
+                                            <a href="groups.php?action=assign&id=<?php echo $group['id']; ?>" class="btn btn-sm btn-secondary">Manage</a>
+                                            <form method="POST" style="display: inline;">
+                                                <input type="hidden" name="group_id" value="<?php echo $group['id']; ?>">
+                                                <button type="submit" name="publish_groups" class="btn btn-sm btn-warning" onclick="return confirm('Are you sure you want to unpublish this group?')">Unpublish</button>
+                                            </form>
+                                        </div>
+                                    </div>
                                 <?php endforeach; ?>
-                            </tbody>
-                        </table>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 <?php endif; ?>
             </div>
@@ -863,14 +997,14 @@ function getServiceTimeDisplay($serviceOrder) {
                 const span = label.querySelector('span');
                 if (span) {
                     const text = span.textContent;
-                    // Extract voice category from the text (Soprano, Alto, etc.)
+                    // Extract voice category from the text
                     if (text.includes('(Good)') || text.includes('(Normal)')) {
                         // Find the parent voice section
                         const voiceSection = checkbox.closest('.voice-section');
                         if (voiceSection) {
                             const h5 = voiceSection.querySelector('h5');
                             if (h5) {
-                                const voiceType = h5.textContent.replace('s', ''); // Remove 's' from "Sopranos"
+                                const voiceType = h5.textContent.replace(/s\s*\(.*/, ''); // Remove 's' and count
                                 voiceCounts[voiceType] = (voiceCounts[voiceType] || 0) + 1;
                             }
                         }
@@ -894,125 +1028,5 @@ function getServiceTimeDisplay($serviceOrder) {
         // Initial count
         updateSelectedCount();
     </script>
-
-    <style>
-        .assignment-interface {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 2rem;
-            margin: 2rem 0;
-        }
-
-        .available-singers {
-            background: var(--primary-white);
-            border: 2px solid var(--border-gray);
-            border-radius: 8px;
-            padding: 1.5rem;
-        }
-
-        .available-singers h4 {
-            margin-bottom: 1rem;
-            color: var(--primary-black);
-            border-bottom: 2px solid var(--accent-yellow);
-            padding-bottom: 0.5rem;
-        }
-
-        .singer-selection {
-            max-height: 500px;
-            overflow-y: auto;
-        }
-
-        .voice-section {
-            margin-bottom: 1.5rem;
-            padding-bottom: 1rem;
-            border-bottom: 1px solid var(--light-gray);
-        }
-
-        .voice-section:last-child {
-            border-bottom: none;
-            margin-bottom: 0;
-        }
-
-        .voice-section h5 {
-            color: var(--primary-black);
-            margin-bottom: 0.75rem;
-            font-size: 1rem;
-        }
-
-        .singer-list {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 0.5rem;
-        }
-
-        .singer-checkbox {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.75rem;
-            padding: 0.5rem;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: background-color 0.2s ease;
-        }
-
-        .singer-checkbox:hover {
-            background: rgba(255, 215, 0, 0.1);
-        }
-
-        .singer-checkbox input[type="checkbox"] {
-            margin-top: 0.25rem;
-            transform: scale(1.2);
-            accent-color: var(--accent-yellow);
-        }
-
-        .singer-checkbox span {
-            font-size: 0.9rem;
-            color: var(--primary-black);
-        }
-
-        .assignment-summary {
-            background: var(--primary-white);
-            border: 2px solid var(--border-gray);
-            border-radius: 8px;
-            padding: 1.5rem;
-            height: fit-content;
-        }
-
-        .assignment-summary h4 {
-            margin-bottom: 1rem;
-            color: var(--primary-black);
-            border-bottom: 2px solid var(--accent-yellow);
-            padding-bottom: 0.5rem;
-        }
-
-        .summary-stats p {
-            margin: 0.75rem 0;
-            font-size: 0.9rem;
-            color: var(--primary-black);
-        }
-
-        .summary-stats strong {
-            display: block;
-            margin-bottom: 0.5rem;
-            color: var(--accent-yellow);
-        }
-
-        .voice-count {
-            font-weight: bold;
-            color: var(--accent-yellow);
-        }
-
-        @media (max-width: 768px) {
-            .assignment-interface {
-                grid-template-columns: 1fr;
-                gap: 1.5rem;
-            }
-
-            .available-singers,
-            .assignment-summary {
-                max-height: none;
-            }
-        }
-    </style>
 </body>
 </html>

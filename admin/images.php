@@ -12,47 +12,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['upload_image'])) {
         if (isset($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
             $uploadDir = '../uploads/images/';
+
+            // Check and create upload directory with proper permissions
             if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
+                if (!mkdir($uploadDir, 0755, true)) {
+                    $message = '❌ Failed to create upload directory. Please check permissions.';
+                }
             }
 
-            $fileName = basename($_FILES['image']['name']);
-            $filePath = $uploadDir . time() . '_' . $fileName;
-            $fileType = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+            // Verify directory is writable
+            if (!is_writable($uploadDir)) {
+                // Try to make it writable
+                if (!chmod($uploadDir, 0755)) {
+                    $message = '❌ Upload directory is not writable. Please check file permissions.';
+                }
+            }
 
-            // Validate file type
-            $allowedTypes = ['jpg', 'jpeg', 'png', 'gif'];
-            if (!in_array($fileType, $allowedTypes)) {
-                $message = 'Only JPG, JPEG, PNG, and GIF files are allowed.';
-            } elseif ($_FILES['image']['size'] > 5 * 1024 * 1024) { // 5MB limit
-                $message = 'File size must be less than 5MB.';
-            } elseif (move_uploaded_file($_FILES['image']['tmp_name'], $filePath)) {
-                // Save to database
-                try {
-                    $stmt = $pdo->prepare("INSERT INTO landing_images (image_path) VALUES (?)");
-                    $stmt->execute([$filePath]);
-                    $message = 'Image uploaded successfully!';
-                    logAction('upload_image', "Uploaded image: $fileName");
-                } catch (PDOException $e) {
-                    // If there's a duplicate key error, try to reset the sequence
-                    if (strpos($e->getMessage(), 'duplicate key') !== false) {
-                        try {
-                            // Reset the sequence to max id + 1
-                            $pdo->exec("SELECT setval('landing_images_id_seq', (SELECT COALESCE(MAX(id), 0) + 1 FROM landing_images))");
-                            // Try the insert again
-                            $stmt = $pdo->prepare("INSERT INTO landing_images (image_path) VALUES (?)");
-                            $stmt->execute([$filePath]);
-                            $message = 'Image uploaded successfully!';
-                            logAction('upload_image', "Uploaded image: $fileName");
-                        } catch (PDOException $e2) {
-                            $message = 'Error uploading image: ' . $e2->getMessage();
+            // Only proceed if no errors so far
+            if (empty($message)) {
+                $fileName = basename($_FILES['image']['name']);
+                // Sanitize filename to prevent issues
+                $safeFileName = preg_replace('/[^a-zA-Z0-9\._-]/', '_', $fileName);
+                $filePath = $uploadDir . time() . '_' . $safeFileName;
+                $fileType = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+
+                // Validate file type
+                $allowedTypes = ['jpg', 'jpeg', 'png', 'gif'];
+                if (!in_array($fileType, $allowedTypes)) {
+                    $message = 'Only JPG, JPEG, PNG, and GIF files are allowed.';
+                }
+                // Validate file size
+                elseif ($_FILES['image']['size'] > 5 * 1024 * 1024) {
+                    $message = 'File size must be less than 5MB.';
+                }
+                // Check if directory is writable
+                elseif (!is_writable($uploadDir)) {
+                    $message = '❌ Upload directory is not writable. Please contact administrator.';
+                }
+                // Try to move uploaded file
+                elseif (!move_uploaded_file($_FILES['image']['tmp_name'], $filePath)) {
+                    $message = '❌ Error uploading file: ' . $_FILES['image']['error'] . ' - Check file permissions and disk space.';
+                }
+                else {
+                    // File uploaded successfully, now save to database
+                    try {
+                        $stmt = $pdo->prepare("INSERT INTO landing_images (image_path) VALUES (?)");
+                        $stmt->execute([$filePath]);
+                        $message = '✅ Image uploaded successfully!';
+                        logAction('upload_image', "Uploaded image: $fileName");
+                    } catch (PDOException $e) {
+                        // If there's a duplicate key error, try to reset the sequence
+                        if (strpos($e->getMessage(), 'duplicate key') !== false) {
+                            try {
+                                // Reset the sequence to max id + 1
+                                $pdo->exec("SELECT setval('landing_images_id_seq', (SELECT COALESCE(MAX(id), 0) + 1 FROM landing_images))");
+                                // Try the insert again
+                                $stmt = $pdo->prepare("INSERT INTO landing_images (image_path) VALUES (?)");
+                                $stmt->execute([$filePath]);
+                                $message = '✅ Image uploaded successfully!';
+                                logAction('upload_image', "Uploaded image: $fileName");
+                            } catch (PDOException $e2) {
+                                $message = '❌ Error saving to database: ' . $e2->getMessage();
+                                // Clean up uploaded file if database save failed
+                                if (file_exists($filePath)) {
+                                    unlink($filePath);
+                                }
+                            }
+                        } else {
+                            $message = '❌ Error saving to database: ' . $e->getMessage();
+                            // Clean up uploaded file if database save failed
+                            if (file_exists($filePath)) {
+                                unlink($filePath);
+                            }
                         }
-                    } else {
-                        $message = 'Error uploading image: ' . $e->getMessage();
                     }
                 }
-            } else {
-                $message = 'Error uploading file.';
             }
         } else {
             $message = 'Please select an image to upload.';
