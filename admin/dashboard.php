@@ -88,31 +88,31 @@ $activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active 
 
                 <!-- Main Statistics Grid -->
                 <div class="dashboard-section">
-                    <h3>📊 Key Metrics</h3>
+                    <h3> Key Metrics</h3>
                     <div class="dashboard-grid">
                         <div class="dashboard-card primary">
-                            <div class="card-icon">🎤</div>
+                            <div class="card-icon"></div>
                             <h3><?php echo $singerCount; ?></h3>
                             <p>Active Singers</p>
                             <small><?php echo $totalSingers; ?> total (<?php echo $inactiveSingers; ?> inactive)</small>
                         </div>
 
                         <div class="dashboard-card primary">
-                            <div class="card-icon">👥</div>
+                            <div class="card-icon"></div>
                             <h3><?php echo $groupCount; ?></h3>
                             <p>Published Groups</p>
                             <small><?php echo $totalGroups; ?> total created</small>
                         </div>
 
                         <div class="dashboard-card secondary">
-                            <div class="card-icon">📈</div>
+                            <div class="card-icon"></div>
                             <h3><?php echo $logCount; ?></h3>
                             <p>Today's Activity</p>
                             <small><?php echo $totalLogs; ?> total logged</small>
                         </div>
 
                         <div class="dashboard-card secondary">
-                            <div class="card-icon">🖼️</div>
+                            <div class="card-icon"></div>
                             <h3><?php echo $imagesCount; ?></h3>
                             <p>Landing Images</p>
                             <small><?php echo $activeImage; ?> currently active</small>
@@ -174,7 +174,7 @@ $activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active 
 
                     <!-- Recent Groups -->
                     <div class="dashboard-section half">
-                        <h3>🎼 Recent Group Activity</h3>
+                        <h3> Recent Group Activity</h3>
                         <div class="recent-list">
                             <?php if (empty($recentGroups)): ?>
                                 <p class="empty-state">No recent groups</p>
@@ -206,23 +206,23 @@ $activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active 
                             <span>Add New Singer</span>
                         </a>
                         <a href="groups.php?action=create" class="action-btn primary">
-                            <span class="action-icon">🎼</span>
+                            <span class="action-icon"></span>
                             <span>Create Groups</span>
                         </a>
                         <a href="images.php" class="action-btn secondary">
-                            <span class="action-icon">📸</span>
+                            <span class="action-icon"></span>
                             <span>Manage Images</span>
                         </a>
                         <a href="logs.php" class="action-btn secondary">
-                            <span class="action-icon">📋</span>
+                            <span class="action-icon"></span>
                             <span>View Logs</span>
                         </a>
                         <a href="singers.php" class="action-btn info">
-                            <span class="action-icon">👥</span>
+                            <span class="action-icon"></span>
                             <span>Manage Singers</span>
                         </a>
                         <a href="groups.php" class="action-btn info">
-                            <span class="action-icon">🎵</span>
+                            <span class="action-icon"></span>
                             <span>Manage Groups</span>
                         </a>
                     </div>

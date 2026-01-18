@@ -77,7 +77,7 @@ $recentLogs = $pdo->query("
         <?php if (!empty($groupsData)): ?>
             <?php foreach ($groupsData as $groupData): ?>
                 <div class="group">
-                    <h3><?php echo htmlspecialchars($groupData['group']['name']); ?></h3>
+                    <h3><?php echo htmlspecialchars($groupData['group']['name']); ?> - <?php echo date('F j, Y', strtotime($groupData['group']['service_date'] ?? $groupData['group']['created_at'])); ?></h3>
                     <p><em>Created: <?php echo date('F j, Y \a\t g:i A', strtotime($groupData['group']['created_at'])); ?></em></p>
 
                     <div class="voice-categories">

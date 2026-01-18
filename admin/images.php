@@ -28,10 +28,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = 'File size must be less than 5MB.';
             } elseif (move_uploaded_file($_FILES['image']['tmp_name'], $filePath)) {
                 // Save to database
-                $stmt = $pdo->prepare("INSERT INTO landing_images (image_path) VALUES (?)");
-                $stmt->execute([$filePath]);
-                $message = 'Image uploaded successfully!';
-                logAction('upload_image', "Uploaded image: $fileName");
+                try {
+                    $stmt = $pdo->prepare("INSERT INTO landing_images (image_path) VALUES (?)");
+                    $stmt->execute([$filePath]);
+                    $message = 'Image uploaded successfully!';
+                    logAction('upload_image', "Uploaded image: $fileName");
+                } catch (PDOException $e) {
+                    // If there's a duplicate key error, try to reset the sequence
+                    if (strpos($e->getMessage(), 'duplicate key') !== false) {
+                        try {
+                            // Reset the sequence to max id + 1
+                            $pdo->exec("SELECT setval('landing_images_id_seq', (SELECT COALESCE(MAX(id), 0) + 1 FROM landing_images))");
+                            // Try the insert again
+                            $stmt = $pdo->prepare("INSERT INTO landing_images (image_path) VALUES (?)");
+                            $stmt->execute([$filePath]);
+                            $message = 'Image uploaded successfully!';
+                            logAction('upload_image', "Uploaded image: $fileName");
+                        } catch (PDOException $e2) {
+                            $message = 'Error uploading image: ' . $e2->getMessage();
+                        }
+                    } else {
+                        $message = 'Error uploading image: ' . $e->getMessage();
+                    }
+                }
             } else {
                 $message = 'Error uploading file.';
             }
@@ -47,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $current = $stmt->fetch();
 
             if ($current) {
-                $newStatus = $current['is_active'] ? 0 : 1;
+                $newStatus = $current['is_active'] ? false : true;
                 $stmt = $pdo->prepare("UPDATE landing_images SET is_active = ? WHERE id = ?");
                 $stmt->execute([$newStatus, $imageId]);
                 $message = $newStatus ? 'Image activated successfully!' : 'Image deactivated successfully!';
@@ -286,23 +305,24 @@ $images = $pdo->query("SELECT * FROM landing_images ORDER BY created_at DESC")->
 }
 
 .btn-activate {
-    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    background: #28a745;
     border-color: #28a745;
+    color: white;
 }
 
 .btn-activate:hover {
-    background: linear-gradient(135deg, #218838 0%, #1aa085 100%);
+    background: #218838;
     color: white;
 }
 
 .btn-deactivate {
-    background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+    background: #ffc107;
     border-color: #ffc107;
     color: #000;
 }
 
 .btn-deactivate:hover {
-    background: linear-gradient(135deg, #e0a800 0%, #d39e00 100%);
+    background: #e0a800;
     color: #000;
 }
 </style>

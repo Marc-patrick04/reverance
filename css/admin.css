@@ -19,7 +19,7 @@
 
 .admin-sidebar {
     width: 250px;
-    background: linear-gradient(180deg, var(--primary-black) 0%, #333 100%);
+    background: var(--primary-black);
     color: var(--primary-white);
     padding: 2rem 0;
     position: fixed;
@@ -143,7 +143,7 @@
     left: 0;
     right: 0;
     height: 4px;
-    background: linear-gradient(90deg, var(--accent-yellow), var(--primary-black));
+    background: var(--accent-yellow);
     border-radius: 8px 8px 0 0;
 }
 
@@ -322,7 +322,7 @@
 
 /* Enhanced Dashboard Styles */
 .welcome-section {
-    background: linear-gradient(135deg, var(--accent-yellow) 0%, #FFD700 50%, var(--primary-white) 100%);
+    background: var(--accent-yellow);
     padding: 2rem;
     border-radius: 12px;
     margin-bottom: 2rem;
@@ -356,7 +356,7 @@
 
 /* Enhanced Cards */
 .dashboard-card.primary {
-    background: linear-gradient(135deg, var(--primary-white) 0%, #FFF8DC 100%);
+    background: var(--light-yellow);
     border-color: var(--accent-yellow);
 }
 
@@ -622,7 +622,7 @@
     font-size: 1.4rem;
     font-weight: bold;
     color: var(--primary-black);
-    background: linear-gradient(135deg, var(--accent-yellow), #FFD700);
+    background: var(--accent-yellow);
     padding: 0.5rem 1rem;
     border-radius: 20px;
     border: 2px solid var(--primary-black);
@@ -723,26 +723,26 @@
 }
 
 .pdf-btn {
-    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    background: #dc3545;
     color: white;
     border-color: #dc3545;
 }
 
 .pdf-btn:hover {
-    background: linear-gradient(135deg, #c82333 0%, #a02622 100%);
+    background: #c82333;
     color: white;
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
 }
 
 .excel-btn {
-    background: linear-gradient(135deg, #28a745 0%, #218838 100%);
+    background: #28a745;
     color: white;
     border-color: #28a745;
 }
 
 .excel-btn:hover {
-    background: linear-gradient(135deg, #218838 0%, #1e7e34 100%);
+    background: #218838;
     color: white;
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
@@ -823,13 +823,13 @@
 }
 
 .action-btn.primary {
-    background: linear-gradient(135deg, var(--primary-black) 0%, #333 100%);
+    background: var(--primary-black);
     color: var(--primary-white);
     border-color: var(--accent-yellow);
 }
 
 .action-btn.primary:hover {
-    background: linear-gradient(135deg, var(--accent-yellow) 0%, #FFD700 100%);
+    background: var(--accent-yellow);
     color: var(--primary-black);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(255, 215, 0, 0.3);
@@ -849,7 +849,7 @@
 }
 
 .action-btn.info {
-    background: linear-gradient(135deg, var(--light-yellow) 0%, #FFF8DC 100%);
+    background: var(--light-yellow);
     color: var(--primary-black);
     border-color: var(--accent-yellow);
 }

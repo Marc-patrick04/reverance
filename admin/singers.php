@@ -10,6 +10,35 @@ $message = '';
 $action = $_GET['action'] ?? 'list';
 $id = $_GET['id'] ?? null;
 
+// Function to clean data for database insertion (removes problematic UTF-8 characters)
+function cleanForDatabase($data) {
+    if (empty($data)) return $data;
+
+    // Convert to string and trim
+    $data = trim((string)$data);
+
+    // Remove any null bytes
+    $data = str_replace("\0", "", $data);
+
+    // Remove control characters except for tab, newline, carriage return
+    $data = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $data);
+
+    // Ensure it's valid UTF-8, replace invalid sequences
+    if (!mb_check_encoding($data, 'UTF-8')) {
+        $data = mb_convert_encoding($data, 'UTF-8', 'UTF-8');
+    }
+
+    // Remove or replace common problematic characters
+    $data = str_replace(['"', "'"], ['"', "'"], $data);
+
+    // Limit length to prevent database issues
+    if (strlen($data) > 500) {
+        $data = substr($data, 0, 500);
+    }
+
+    return $data;
+}
+
 // Function to convert technical database errors to user-friendly messages
 function getUserFriendlyError($errorMessage) {
     if (strpos($errorMessage, 'SQLSTATE[23000]') !== false && strpos($errorMessage, 'Duplicate entry') !== false) {
@@ -81,21 +110,158 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = getUserFriendlyError($e->getMessage());
         }
     } elseif (isset($_POST['delete_singer'])) {
-        try {
-            $stmt = $pdo->prepare("SELECT full_name FROM singers WHERE id = ?");
-            $stmt->execute([$id]);
-            $singer = $stmt->fetch();
-
-            $stmt = $pdo->prepare("DELETE FROM singers WHERE id = ?");
-            $stmt->execute([$id]);
-            $message = 'Singer deleted successfully!';
-            logAction('delete_singer', "Deleted singer: " . $singer['full_name']);
-        } catch (PDOException $e) {
-            $message = getUserFriendlyError($e->getMessage());
+        $deleteId = $_POST['id'] ?? null;
+        if ($deleteId) {
+            try {
+                $stmt = $pdo->prepare("SELECT full_name FROM singers WHERE id = ?");
+                $stmt->execute([$deleteId]);
+                $singer = $stmt->fetch();
+                if ($singer) {
+                    $stmt = $pdo->prepare("DELETE FROM singers WHERE id = ?");
+                    $stmt->execute([$deleteId]);
+                    $message = 'Singer deleted successfully!';
+                    logAction('delete_singer', "Deleted singer: " . $singer['full_name']);
+                } else {
+                    $message = 'Singer not found.';
+                }
+            } catch (PDOException $e) {
+                $message = getUserFriendlyError($e->getMessage());
+            }
+        } else {
+            $message = 'Invalid singer ID.';
         }
     } elseif (isset($_POST['import_excel'])) {
-        // Handle Excel import (simplified - would need PHPExcel or similar library)
-        $message = 'Excel import functionality would be implemented here with a proper Excel parsing library.';
+        if (!isset($_FILES['excel_file']) || $_FILES['excel_file']['error'] !== UPLOAD_ERR_OK) {
+            $message = 'Please select a valid file to upload.';
+        } else {
+            $file = $_FILES['excel_file'];
+            $fileName = $file['name'];
+            $fileTmpName = $file['tmp_name'];
+            $fileSize = $file['size'];
+
+            // Basic validation
+            if ($fileSize > 5 * 1024 * 1024) {
+                $message = 'File size must be less than 5MB.';
+            } elseif (!in_array(pathinfo($fileName, PATHINFO_EXTENSION), ['csv', 'xlsx', 'xls'])) {
+                $message = 'Please upload a CSV or Excel file (.csv, .xlsx, or .xls).';
+            } else {
+                try {
+                    $importedCount = 0;
+                    $skippedCount = 0;
+                    $errors = [];
+
+                    // Handle different file types
+                    $extension = pathinfo($fileName, PATHINFO_EXTENSION);
+
+                    if ($extension === 'csv') {
+                        // Simple CSV import
+                        $handle = fopen($fileTmpName, 'r');
+                        if ($handle) {
+                            $rowNumber = 0;
+                            $headers = [];
+
+                            while (($row = fgetcsv($handle, 1000, ',')) !== false) {
+                                $rowNumber++;
+
+                                // Clean the row
+                                $row = array_map('trim', $row);
+
+                                // Skip empty rows
+                                if (empty(array_filter($row))) continue;
+
+                                if ($rowNumber === 1) {
+                                    // Get headers and check basic requirements
+                                    $headers = $row;
+                                    if (count($headers) < 3) {
+                                        $errors[] = 'CSV must have at least 3 columns: Full Name, Voice Category, Voice Level';
+                                        break;
+                                    }
+                                    continue;
+                                }
+
+                                // Process data rows
+                                if (count($row) >= 3) {
+                                    // Clean and sanitize data to prevent UTF-8 issues
+                                    $fullName = cleanForDatabase($row[0] ?? '');
+                                    $voiceCategory = cleanForDatabase($row[1] ?? '');
+                                    $voiceLevel = cleanForDatabase($row[2] ?? '');
+                                    $status = cleanForDatabase(isset($row[3]) ? $row[3] : 'Active');
+                                    $notes = cleanForDatabase(isset($row[4]) ? $row[4] : '');
+
+                                    // Basic validation
+                                    if (empty($fullName)) {
+                                        $errors[] = "Row $rowNumber: Full Name is required";
+                                        continue;
+                                    }
+
+                                    if (!in_array(strtolower($voiceCategory), ['soprano', 'alto', 'tenor', 'bass'])) {
+                                        $errors[] = "Row $rowNumber: Voice Category must be Soprano, Alto, Tenor, or Bass (got: $voiceCategory)";
+                                        continue;
+                                    }
+
+                                    if (!in_array(strtolower($voiceLevel), ['good', 'normal'])) {
+                                        $errors[] = "Row $rowNumber: Voice Level must be Good or Normal (got: $voiceLevel)";
+                                        continue;
+                                    }
+
+                                    // Check for duplicates
+                                    $checkStmt = $pdo->prepare("SELECT id FROM singers WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(?))");
+                                    $checkStmt->execute([$fullName]);
+                                    if ($checkStmt->fetch()) {
+                                        $skippedCount++;
+                                        continue;
+                                    }
+
+                                    // Insert the singer
+                                    $insertStmt = $pdo->prepare("INSERT INTO singers (full_name, voice_category, voice_level, status, notes) VALUES (?, ?, ?, ?, ?)");
+                                    $insertStmt->execute([$fullName, ucfirst(strtolower($voiceCategory)), ucfirst(strtolower($voiceLevel)), $status, $notes]);
+                                    $importedCount++;
+                                }
+                            }
+                            fclose($handle);
+                        } else {
+                            $message = 'Could not open the uploaded file.';
+                        }
+                    } else {
+                        // Excel files - show conversion message
+                        $message = '❌ Excel file (.xlsx) detected.<br><br>';
+                        $message .= '<strong>To import Excel files, convert to CSV format:</strong><br><br>';
+                        $message .= '📋 <strong>Quick Steps:</strong><br>';
+                        $message .= '1. Open your Excel file<br>';
+                        $message .= '2. File → Save As → CSV (Comma delimited)<br>';
+                        $message .= '3. Upload the .csv file here<br><br>';
+                        $message .= '<small>💡 <strong>Tip:</strong> Use the downloaded template for best results.</small>';
+                    }
+
+                    // Generate result message
+                    if (empty($errors)) {
+                        if ($importedCount > 0) {
+                            $message = "✅ Successfully imported $importedCount singer(s)!";
+                            if ($skippedCount > 0) {
+                                $message .= " ($skippedCount duplicate(s) skipped)";
+                            }
+                            logAction('import_csv', "Imported $importedCount singers from CSV file");
+                        } elseif ($skippedCount > 0) {
+                            $message = "ℹ️ No new singers imported. All $skippedCount singer(s) were duplicates.";
+                        } else {
+                            $message = 'ℹ️ No singers were imported. Please check your file has data rows.';
+                        }
+                    } else {
+                        $message = '❌ Import failed with errors:<br><ul>';
+                        foreach (array_slice($errors, 0, 5) as $error) {
+                            $message .= "<li>$error</li>";
+                        }
+                        if (count($errors) > 5) {
+                            $message .= "<li>... and " . (count($errors) - 5) . " more errors</li>";
+                        }
+                        $message .= '</ul><br><small>Please fix the errors and try again.</small>';
+                    }
+
+                } catch (Exception $e) {
+                    $message = '❌ Import failed: ' . $e->getMessage();
+                }
+            }
+        }
     }
 }
 
@@ -105,6 +271,10 @@ if ($action === 'edit' && $id) {
     $stmt = $pdo->prepare("SELECT * FROM singers WHERE id = ?");
     $stmt->execute([$id]);
     $singer = $stmt->fetch();
+    if (!$singer) {
+        $message = 'Singer not found.';
+        $action = 'list';
+    }
 }
 
 // Build the singers query with search and filters
@@ -247,18 +417,106 @@ $inactiveSingers = $pdo->query("SELECT COUNT(*) FROM singers WHERE status = 'Ina
                     </div>
                 <?php elseif ($action === 'import'): ?>
                     <div class="form-container">
-                        <h3>Import Singers from Excel</h3>
-                        <p>Upload an Excel file (.xlsx) with columns: Full Name, Voice, Level</p>
-                        <form method="POST" enctype="multipart/form-data">
-                            <div class="form-group">
-                                <label for="excel_file">Excel File:</label>
-                                <input type="file" id="excel_file" name="excel_file" accept=".xlsx" required>
+                        <h3>📤 Import Singers from Excel</h3>
+
+                        <!-- Excel Format Instructions -->
+                        <div class="excel-format-info">
+                            <h4>📋 Required Excel Format</h4>
+                            <p>Your Excel file must have these columns in the first row:</p>
+
+                            <div class="format-table">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Column A</th>
+                                            <th>Column B</th>
+                                            <th>Column C</th>
+                                            <th>Column D</th>
+                                            <th>Column E</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr class="header-row">
+                                            <td><strong>Full Name</strong></td>
+                                            <td><strong>Voice Category</strong></td>
+                                            <td><strong>Voice Level</strong></td>
+                                            <td><strong>Status</strong></td>
+                                            <td><strong>Notes</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td>John Doe</td>
+                                            <td>Soprano</td>
+                                            <td>Good</td>
+                                            <td>Active</td>
+                                            <td>Lead vocalist</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Jane Smith</td>
+                                            <td>Alto</td>
+                                            <td>Normal</td>
+                                            <td>Active</td>
+                                            <td>Backup singer</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Michael Johnson</td>
+                                            <td>Tenor</td>
+                                            <td>Good</td>
+                                            <td>Active</td>
+                                            <td></td>
+                                        </tr>
+                                        <tr>
+                                            <td>Bob Wilson</td>
+                                            <td>Bass</td>
+                                            <td>Normal</td>
+                                            <td>Inactive</td>
+                                            <td>On leave</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
-                            <div class="form-actions">
-                                <button type="submit" name="import_excel" class="btn">Import</button>
-                                <a href="singers.php" class="btn">Cancel</a>
+
+                            <div class="format-rules">
+                                <h5>📝 Format Rules:</h5>
+                                <ul>
+                                    <li><strong>Full Name:</strong> Required. Full name of the singer (e.g., "John Doe")</li>
+                                    <li><strong>Voice Category:</strong> Required. Must be: Soprano, Alto, Tenor, or Bass</li>
+                                    <li><strong>Voice Level:</strong> Required. Must be: Good or Normal</li>
+                                    <li><strong>Status:</strong> Optional. Active or Inactive (defaults to Active)</li>
+                                    <li><strong>Notes:</strong> Optional. Any additional notes about the singer</li>
+                                </ul>
+
+                                <h5>⚠️ Important Notes:</h5>
+                                <ul>
+                                    <li>First row must contain the column headers exactly as shown</li>
+                                    <li>Duplicate names will be skipped during import</li>
+                                    <li>Empty rows will be ignored</li>
+                                    <li>Save your file as .xlsx format</li>
+                                </ul>
                             </div>
-                        </form>
+
+                            <div class="template-download">
+                                <a href="#" onclick="downloadTemplate()" class="btn btn-primary">
+                                    📥 Download Excel Template
+                                </a>
+                                <small>Create your singer list using this pre-formatted template</small>
+                            </div>
+                        </div>
+
+                        <!-- Upload Form -->
+                        <div class="upload-section">
+                            <h4>Upload Your Excel File</h4>
+                            <form method="POST" enctype="multipart/form-data">
+                                <div class="form-group">
+                                    <label for="excel_file">Select Excel/CSV File:</label>
+                                    <input type="file" id="excel_file" name="excel_file" accept=".xlsx,.xls,.csv" required>
+                                    <small>Supported formats: CSV (.csv), Excel (.xlsx, .xls) - Maximum file size: 5MB</small>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" name="import_excel" class="btn">📤 Import Singers</button>
+                                    <a href="singers.php" class="btn">Cancel</a>
+                                </div>
+                            </form>
+                        </div>
                     </div>
                 <?php else: ?>
                     <div style="margin-bottom: 2rem;">
@@ -403,5 +661,228 @@ $inactiveSingers = $pdo->query("SELECT COUNT(*) FROM singers WHERE status = 'Ina
     </footer>
 
     <script src="../js/main.js"></script>
+    <script>
+        function downloadTemplate() {
+            // Create a simple Excel template data
+            const templateData = [
+                ['Full Name', 'Voice Category', 'Voice Level', 'Status', 'Notes'],
+                ['John Doe', 'Soprano', 'Good', 'Active', 'Lead vocalist'],
+                ['Jane Smith', 'Alto', 'Normal', 'Active', 'Backup singer'],
+                ['Michael Johnson', 'Tenor', 'Good', 'Active', ''],
+                ['Bob Wilson', 'Bass', 'Normal', 'Inactive', 'On leave']
+            ];
+
+            // Convert to CSV format
+            const csvContent = templateData.map(row =>
+                row.map(cell => `"${cell}"`).join(',')
+            ).join('\n');
+
+            // Create download link
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'singers_template.csv');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            alert('Template downloaded! Note: Save the file as .xlsx in Excel for best compatibility.');
+        }
+    </script>
+
+    <style>
+        /* Override width restrictions for the entire import page */
+        .admin-content,
+        .form-container {
+            max-width: none !important;
+            width: 100% !important;
+        }
+
+        .excel-format-info {
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .excel-format-info h4 {
+            color: #495057;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 0.5rem;
+        }
+
+        .format-table {
+            margin: 1.5rem 0;
+            border-radius: 6px;
+            overflow-x: auto;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            width: 100%;
+        }
+
+        .format-table table {
+            width: 100%;
+            min-width: 800px;
+            border-collapse: collapse;
+        }
+
+        .format-table th,
+        .format-table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #dee2e6;
+            white-space: nowrap;
+        }
+
+        .format-table th {
+            background: #007bff;
+            color: white;
+            font-weight: 600;
+            min-width: 120px;
+        }
+
+        .format-table .header-row {
+            background: #28a745;
+        }
+
+        .format-table .header-row td {
+            font-weight: bold;
+            color: white;
+            min-width: 120px;
+        }
+
+        .format-rules {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+            margin: 1.5rem 0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .format-rules h5 {
+            color: #495057;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+        }
+
+        .format-rules ul {
+            margin: 0;
+            padding-left: 1.5rem;
+        }
+
+        .format-rules li {
+            margin-bottom: 0.5rem;
+            color: #495057;
+        }
+
+        .format-rules li strong {
+            color: #007bff;
+        }
+
+        .template-download {
+            text-align: center;
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background: #e9ecef;
+            border-radius: 6px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .template-download small {
+            display: block;
+            margin-top: 0.5rem;
+            color: #6c757d;
+        }
+
+        .upload-section {
+            background: white;
+            border: 2px solid #007bff;
+            border-radius: 8px;
+            padding: 2rem;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .upload-section h4 {
+            color: #007bff;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+
+        .upload-section .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .upload-section input[type="file"] {
+            padding: 0.75rem;
+            border: 2px solid #dee2e6;
+            border-radius: 6px;
+            width: 100%;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+
+        .upload-section small {
+            color: #6c757d;
+            font-style: italic;
+        }
+
+        /* Improve table readability on smaller screens */
+        @media (max-width: 1024px) {
+            .format-table table {
+                min-width: 700px;
+            }
+
+            .format-table th,
+            .format-table td {
+                padding: 0.5rem;
+                font-size: 0.9rem;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .excel-format-info {
+                padding: 1rem;
+            }
+
+            .format-table table {
+                min-width: 600px;
+            }
+
+            .format-table th,
+            .format-table td {
+                padding: 0.4rem;
+                font-size: 0.8rem;
+            }
+
+            .format-rules {
+                padding: 1rem;
+            }
+
+            .upload-section {
+                padding: 1rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .format-table table {
+                min-width: 500px;
+            }
+
+            .format-table th,
+            .format-table td {
+                padding: 0.3rem;
+                font-size: 0.75rem;
+            }
+        }
+    </style>
 </body>
 </html>

@@ -233,7 +233,7 @@ $message = '';
                                    COUNT(DISTINCT ga.singer_id) as singer_count
                             FROM groups g
                             LEFT JOIN group_assignments ga ON g.id = ga.group_id
-                            WHERE DATE_FORMAT(g.service_date, '%Y-%m') = ?
+                            WHERE TO_CHAR(g.service_date, 'YYYY-MM') = ?
                             GROUP BY DATE(g.service_date)
                             ORDER BY service_date
                         ");
@@ -246,7 +246,7 @@ $message = '';
                                    g.service_order, COUNT(ga.singer_id) as singer_count
                             FROM groups g
                             LEFT JOIN group_assignments ga ON g.id = ga.group_id
-                            WHERE DATE_FORMAT(g.service_date, '%Y-%m') = ?
+                            WHERE TO_CHAR(g.service_date, 'YYYY-MM') = ?
                             GROUP BY g.id
                             ORDER BY g.service_date, g.service_order
                         ");
@@ -289,7 +289,7 @@ $message = '';
                                 FROM groups g
                                 JOIN group_assignments ga ON g.id = ga.group_id
                                 JOIN singers s ON ga.singer_id = s.id
-                                WHERE DATE_FORMAT(g.service_date, '%Y-%m') = ?
+                                WHERE TO_CHAR(g.service_date, 'YYYY-MM') = ?
                                 ORDER BY g.service_date, g.name, s.voice_category, s.voice_level DESC
                             ");
                             $stmt->execute([$reportMonth]);
