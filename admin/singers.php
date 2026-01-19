@@ -420,79 +420,10 @@ $inactiveSingers = $pdo->query("SELECT COUNT(*) FROM singers WHERE status = 'Ina
                         <h3>📤 Import Singers from Excel</h3>
 
                         <!-- Excel Format Instructions -->
-                        <div class="excel-format-info">
-                            <h4>📋 Required Excel Format</h4>
-                            <p>Your Excel file must have these columns in the first row:</p>
+                        
 
-                            <div class="format-table">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th>Column A</th>
-                                            <th>Column B</th>
-                                            <th>Column C</th>
-                                            <th>Column D</th>
-                                            <th>Column E</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr class="header-row">
-                                            <td><strong>Full Name</strong></td>
-                                            <td><strong>Voice Category</strong></td>
-                                            <td><strong>Voice Level</strong></td>
-                                            <td><strong>Status</strong></td>
-                                            <td><strong>Notes</strong></td>
-                                        </tr>
-                                        <tr>
-                                            <td>John Doe</td>
-                                            <td>Soprano</td>
-                                            <td>Good</td>
-                                            <td>Active</td>
-                                            <td>Lead vocalist</td>
-                                        </tr>
-                                        <tr>
-                                            <td>Jane Smith</td>
-                                            <td>Alto</td>
-                                            <td>Normal</td>
-                                            <td>Active</td>
-                                            <td>Backup singer</td>
-                                        </tr>
-                                        <tr>
-                                            <td>Michael Johnson</td>
-                                            <td>Tenor</td>
-                                            <td>Good</td>
-                                            <td>Active</td>
-                                            <td></td>
-                                        </tr>
-                                        <tr>
-                                            <td>Bob Wilson</td>
-                                            <td>Bass</td>
-                                            <td>Normal</td>
-                                            <td>Inactive</td>
-                                            <td>On leave</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            <div class="format-rules">
-                                <h5>📝 Format Rules:</h5>
-                                <ul>
-                                    <li><strong>Full Name:</strong> Required. Full name of the singer (e.g., "John Doe")</li>
-                                    <li><strong>Voice Category:</strong> Required. Must be: Soprano, Alto, Tenor, or Bass</li>
-                                    <li><strong>Voice Level:</strong> Required. Must be: Good or Normal</li>
-                                    <li><strong>Status:</strong> Optional. Active or Inactive (defaults to Active)</li>
-                                    <li><strong>Notes:</strong> Optional. Any additional notes about the singer</li>
-                                </ul>
-
-                                <h5>⚠️ Important Notes:</h5>
-                                <ul>
-                                    <li>First row must contain the column headers exactly as shown</li>
-                                    <li>Duplicate names will be skipped during import</li>
-                                    <li>Empty rows will be ignored</li>
-                                    <li>Save your file as .xlsx format</li>
-                                </ul>
-                            </div>
+                            
+                            
 
                             <div class="template-download">
                                 <a href="#" onclick="downloadTemplate()" class="btn btn-primary">

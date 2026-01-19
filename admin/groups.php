@@ -158,19 +158,21 @@ function createGroups($groupCount, $groupNames, $serviceDate, $mixingMethod) {
         return false;
     }
 
-    // Validate complete assignment - count unique singers
-    $totalSingers = count(getActiveSingers());
-    $assignedSingersSet = [];
-    foreach ($result['assignments'] as $group) {
-        foreach ($group as $singerId) {
-            $assignedSingersSet[$singerId] = true; // Use as set to avoid duplicates
+    // Validate complete assignment - count unique singers (skip for manual assignment)
+    if ($mixingMethod !== 'manual') {
+        $totalSingers = count(getActiveSingers());
+        $assignedSingersSet = [];
+        foreach ($result['assignments'] as $group) {
+            foreach ($group as $singerId) {
+                $assignedSingersSet[$singerId] = true; // Use as set to avoid duplicates
+            }
         }
-    }
-    $assignedSingers = count($assignedSingersSet);
+        $assignedSingers = count($assignedSingersSet);
 
-    if ($assignedSingers !== $totalSingers) {
-        addError("Assignment algorithm failed: {$assignedSingers} singers assigned, {$totalSingers} total active singers.");
-        return false;
+        if ($assignedSingers !== $totalSingers) {
+            addError("Assignment algorithm failed: {$assignedSingers} singers assigned, {$totalSingers} total active singers.");
+            return false;
+        }
     }
 
     // Create groups in database
@@ -199,7 +201,14 @@ function createGroups($groupCount, $groupNames, $serviceDate, $mixingMethod) {
         }
 
         $pdo->commit();
-        setMessage("✅ Groups created successfully! {$assignedSingers} singers assigned across {$groupCount} groups. Groups are saved as drafts - publish them when ready.");
+
+        // Different message for manual assignment
+        if ($mixingMethod === 'manual') {
+            setMessage("✅ Empty groups created successfully! {$groupCount} groups are ready for manual singer assignment. Groups are saved as drafts - publish them when ready.");
+        } else {
+            setMessage("✅ Groups created successfully! {$assignedSingers} singers assigned across {$groupCount} groups. Groups are saved as drafts - publish them when ready.");
+        }
+
         logAction('create_groups', "Created {$groupCount} groups for {$serviceDate}: " . implode(', ', $groupNames));
         return true;
 
@@ -433,123 +442,83 @@ function distributeSingersRandomly($singerIds, $currentAssignments) {
 
     global $pdo;
 
-    // Get previous published groups and their singers for mixing
-    $previousGroups = [];
-    try {
-        $stmt = $pdo->query("SELECT id, name FROM groups WHERE is_published = true ORDER BY service_date DESC LIMIT 5");
-        $publishedGroups = $stmt->fetchAll();
+    // Get singer details for voice balancing
+    $singersByVoice = [];
+    $voiceCategories = ['Soprano', 'Alto', 'Tenor', 'Bass'];
 
-        foreach ($publishedGroups as $group) {
-            $stmt = $pdo->prepare("SELECT singer_id FROM group_assignments WHERE group_id = ?");
-            $stmt->execute([$group['id']]);
-            $groupSingers = array_column($stmt->fetchAll(), 'singer_id');
-            $previousGroups[$group['name']] = $groupSingers;
+    foreach ($singerIds as $singerId) {
+        $stmt = $pdo->prepare("SELECT voice_category, voice_level FROM singers WHERE id = ?");
+        $stmt->execute([$singerId]);
+        $singer = $stmt->fetch();
+        if ($singer) {
+            $voice = $singer['voice_category'];
+            $level = $singer['voice_level'];
+            if (!isset($singersByVoice[$voice])) {
+                $singersByVoice[$voice] = ['Good' => [], 'Normal' => []];
+            }
+            $singersByVoice[$voice][$level][] = $singerId;
         }
-    } catch (PDOException $e) {
-        // If database error, fall back to simple random
-        $previousGroups = [];
     }
 
     $result = array_fill(0, $numGroups, []);
 
-    // If no previous groups exist, do simple random distribution
-    if (empty($previousGroups)) {
-        // Separate by skill level for quality balance
-        $goodSingers = [];
-        $normalSingers = [];
+    // Distribute singers by voice category for balanced distribution
+    foreach ($voiceCategories as $voice) {
+        if (!isset($singersByVoice[$voice])) continue;
 
-        foreach ($singerIds as $singerId) {
-            $stmt = $pdo->prepare("SELECT voice_level FROM singers WHERE id = ?");
-            $stmt->execute([$singerId]);
-            $singer = $stmt->fetch();
-            if ($singer) {
-                if ($singer['voice_level'] === 'Good') {
-                    $goodSingers[] = $singerId;
-                } else {
-                    $normalSingers[] = $singerId;
-                }
+        // First distribute Good singers of this voice evenly
+        $goodSingers = $singersByVoice[$voice]['Good'];
+        if (!empty($goodSingers)) {
+            shuffle($goodSingers);
+            $distributed = distributeEvenly($goodSingers, $numGroups);
+
+            foreach ($distributed as $groupIndex => $groupSingers) {
+                $result[$groupIndex] = array_merge($result[$groupIndex], $groupSingers);
             }
         }
 
-        // Distribute Good singers evenly across all groups first
-        shuffle($goodSingers);
-        $goodIndex = 0;
-        foreach ($goodSingers as $singerId) {
-            $groupIndex = $goodIndex % $numGroups;
-            $result[$groupIndex][] = $singerId;
-            $goodIndex++;
-        }
+        // Then distribute Normal singers of this voice evenly
+        $normalSingers = $singersByVoice[$voice]['Normal'];
+        if (!empty($normalSingers)) {
+            shuffle($normalSingers);
+            $distributed = distributeEvenly($normalSingers, $numGroups);
 
-        // Distribute Normal singers evenly across groups
-        shuffle($normalSingers);
-        $normalIndex = 0;
-        foreach ($normalSingers as $singerId) {
-            $groupIndex = $normalIndex % $numGroups;
-            $result[$groupIndex][] = $singerId;
-            $normalIndex++;
-        }
-
-        return $result;
-    }
-
-    // Step 1: Process previous groups and collect singers to potentially move
-    $singersToPotentiallyMove = [];
-    foreach ($previousGroups as $groupName => $groupSingers) {
-        if (empty($groupSingers)) continue;
-        $singersToPotentiallyMove = array_merge($singersToPotentiallyMove, $groupSingers);
-    }
-
-    // Step 2: Move approximately half of singers from previous groups for better mixing
-    $movedSingers = [];
-    $totalPreviousSingers = count($singersToPotentiallyMove);
-
-    if ($totalPreviousSingers > 0) {
-        $moveCount = max(1, intval($totalPreviousSingers / 2)); // Move at least 1, ideally half
-
-        // Shuffle to randomize who moves
-        shuffle($singersToPotentiallyMove);
-
-        // Take the first half to move
-        $movedSingers = array_slice($singersToPotentiallyMove, 0, $moveCount);
-    }
-
-    // Step 3: All singers (both moved and staying) need to be redistributed
-    // This ensures ALL singers are assigned to new groups
-    $allSingersToDistribute = $singerIds; // Start with ALL active singers
-
-    // Step 4: Separate by skill level for quality balance
-    $goodSingers = [];
-    $normalSingers = [];
-
-    foreach ($allSingersToDistribute as $singerId) {
-        $stmt = $pdo->prepare("SELECT voice_level FROM singers WHERE id = ?");
-        $stmt->execute([$singerId]);
-        $singer = $stmt->fetch();
-        if ($singer) {
-            if ($singer['voice_level'] === 'Good') {
-                $goodSingers[] = $singerId;
-            } else {
-                $normalSingers[] = $singerId;
+            foreach ($distributed as $groupIndex => $groupSingers) {
+                $result[$groupIndex] = array_merge($result[$groupIndex], $groupSingers);
             }
         }
     }
 
-    // Step 5: Distribute Good singers evenly across all groups first
-    shuffle($goodSingers);
-    $goodIndex = 0;
-    foreach ($goodSingers as $singerId) {
-        $groupIndex = $goodIndex % $numGroups;
-        $result[$groupIndex][] = $singerId;
-        $goodIndex++;
+    return $result;
+}
+
+// Helper function to distribute singers evenly across groups
+function distributeEvenly($singers, $numGroups) {
+    $result = array_fill(0, $numGroups, []);
+    $totalSingers = count($singers);
+
+    if ($totalSingers === 0) return $result;
+
+    // Calculate base singers per group and remainder
+    $basePerGroup = intdiv($totalSingers, $numGroups);
+    $remainder = $totalSingers % $numGroups;
+
+    $singerIndex = 0;
+
+    // First, distribute the base amount to all groups
+    for ($groupIndex = 0; $groupIndex < $numGroups; $groupIndex++) {
+        for ($i = 0; $i < $basePerGroup; $i++) {
+            if ($singerIndex < $totalSingers) {
+                $result[$groupIndex][] = $singers[$singerIndex++];
+            }
+        }
     }
 
-    // Step 6: Distribute Normal singers evenly across groups
-    shuffle($normalSingers);
-    $normalIndex = 0;
-    foreach ($normalSingers as $singerId) {
-        $groupIndex = $normalIndex % $numGroups;
-        $result[$groupIndex][] = $singerId;
-        $normalIndex++;
+    // Then distribute the remainder (one extra singer to each group until remainder is exhausted)
+    for ($i = 0; $i < $remainder; $i++) {
+        if ($singerIndex < $totalSingers) {
+            $result[$i][] = $singers[$singerIndex++];
+        }
     }
 
     return $result;
@@ -673,7 +642,6 @@ function getServiceTimeDisplay($serviceOrder) {
                                     <label for="mixing_method">Group Creation Method:</label>
                                     <select id="mixing_method" name="mixing_method" required>
                                         <option value="random">🎲 Random Assignment</option>
-                                        <option value="rotation">🎯 Smart Rotation</option>
                                         <option value="balanced">⚖️ Balanced Distribution</option>
                                         <option value="manual">👥 Manual Assignment</option>
                                     </select>
@@ -682,9 +650,6 @@ function getServiceTimeDisplay($serviceOrder) {
                             </div>
 
                             <div id="method-description" class="method-description">
-                                <div class="method-info" data-method="rotation">
-                                    <strong>🎯 Smart Rotation:</strong> Prioritizes singers who haven't been in certain groups recently. Ensures fair rotation and new experiences.
-                                </div>
                                 <div class="method-info" data-method="balanced">
                                     <strong>⚖️ Balanced Distribution:</strong> Distributes singers evenly by voice type and skill level. Maintains musical balance.
                                 </div>
@@ -868,6 +833,7 @@ function getServiceTimeDisplay($serviceOrder) {
                             <div class="assignment-container">
                                 <div class="available-singers">
                                     <h4>Available Singers</h4>
+                                    <p class="assignment-note">⚠️ <strong>Note:</strong> Singers already assigned to other groups on this date are disabled.</p>
                                     <div class="singer-selection">
                                         <?php
                                         $allSingers = getActiveSingers();
@@ -876,19 +842,43 @@ function getServiceTimeDisplay($serviceOrder) {
                                         $stmt->execute([$assignGroup['id']]);
                                         $assignedIds = array_column($stmt->fetchAll(), 'singer_id');
 
+                                        // Get singers already assigned to other groups on the same date
+                                        $unavailableSingers = [];
+                                        $stmt = $pdo->prepare("
+                                            SELECT DISTINCT ga.singer_id
+                                            FROM group_assignments ga
+                                            JOIN groups g ON ga.group_id = g.id
+                                            WHERE g.service_date = ? AND g.id != ?
+                                        ");
+                                        $stmt->execute([$assignGroup['service_date'], $assignGroup['id']]);
+                                        $unavailableIds = array_column($stmt->fetchAll(), 'singer_id');
+                                        $unavailableSingers = array_flip($unavailableIds);
+
                                         $voices = ['Soprano', 'Alto', 'Tenor', 'Bass'];
                                         foreach ($voices as $voice):
                                             $voiceSingers = array_filter($allSingers, fn($s) => $s['voice_category'] === $voice);
                                             if (empty($voiceSingers)) continue;
+
+                                            $availableCount = count(array_filter($voiceSingers, fn($s) => !isset($unavailableSingers[$s['id']]) || in_array($s['id'], $assignedIds)));
                                         ?>
                                             <div class="voice-section">
-                                                <h5><?php echo $voice; ?>s <span class="count">(<?php echo count($voiceSingers); ?>)</span></h5>
+                                                <h5><?php echo $voice; ?>s <span class="count">(<?php echo $availableCount; ?>/<?php echo count($voiceSingers); ?> available)</span></h5>
                                                 <div class="singer-list">
-                                                    <?php foreach ($voiceSingers as $singer): ?>
-                                                        <label class="singer-checkbox">
+                                                    <?php foreach ($voiceSingers as $singer):
+                                                        $isUnavailable = isset($unavailableSingers[$singer['id']]) && !in_array($singer['id'], $assignedIds);
+                                                        $isChecked = in_array($singer['id'], $assignedIds);
+                                                    ?>
+                                                        <label class="singer-checkbox <?php echo $isUnavailable ? 'unavailable' : ''; ?>">
                                                             <input type="checkbox" name="singers[]" value="<?php echo $singer['id']; ?>"
-                                                                   <?php echo in_array($singer['id'], $assignedIds) ? 'checked' : ''; ?>>
-                                                            <span><?php echo htmlspecialchars($singer['full_name']); ?> <small>(<?php echo $singer['voice_level']; ?>)</small></span>
+                                                                   <?php echo $isChecked ? 'checked' : ''; ?>
+                                                                   <?php echo $isUnavailable ? 'disabled' : ''; ?>>
+                                                            <span>
+                                                                <?php echo htmlspecialchars($singer['full_name']); ?>
+                                                                <small>(<?php echo $singer['voice_level']; ?>)</small>
+                                                                <?php if ($isUnavailable): ?>
+                                                                    <em class="unavailable-text"> - Assigned to another group</em>
+                                                                <?php endif; ?>
+                                                            </span>
                                                         </label>
                                                     <?php endforeach; ?>
                                                 </div>

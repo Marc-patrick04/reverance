@@ -489,11 +489,6 @@ $message = '';
                     ?>
 
                     <h5>Mixing Tracking Report</h5>
-                    <div class="export-actions">
-                        <button onclick="previewReport('mixing-report')" class="btn export-btn preview-btn"> Preview</button>
-                        <button onclick="exportToExcel('mixing')" class="btn export-btn excel-btn">📊 Export Excel</button>
-                        <button onclick="downloadReport('mixing-report', 'Mixing_Tracking_Report')" class="btn export-btn pdf-btn">📄 Download PDF</button>
-                    </div>
 
                     <?php if (!empty($mixingData)): ?>
                         <div id="mixing-report" class="mixing-report">
@@ -568,21 +563,8 @@ $message = '';
                                 </table>
                             </div>
 
-                            <!-- Overall Summary -->
-                            <div class="overall-summary" style="margin-top: 2rem; padding: 1.5rem; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
-                                <h6 style="margin-bottom: 1rem; color: #333;">Overall Summary</h6>
-                                <div class="summary-stats">
-                                    <div class="summary-item">
-                                        <strong>Total Movement Periods:</strong> <?php echo count($mixingData); ?>
-                                    </div>
-                                    <div class="summary-item">
-                                        <strong>Total Singer Movements:</strong> <?php echo array_sum(array_column($mixingData, 'total_movements')); ?>
-                                    </div>
-                                    <div class="summary-item">
-                                        <strong>Average Movements per Period:</strong> <?php echo count($mixingData) > 0 ? round(array_sum(array_column($mixingData, 'total_movements')) / count($mixingData), 1) : 0; ?>
-                                    </div>
-                                </div>
-                            </div>
+                           
+                            
                         </div>
                     <?php else: ?>
                         <p>No mixing data available. Need at least two created group dates to track movements.</p>
