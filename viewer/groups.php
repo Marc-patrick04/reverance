@@ -97,8 +97,10 @@ $recentLogs = $pdo->query("
                                             <div class="level-group">
                                                 <h5>Strong / Experienced:</h5>
                                                 <ul>
+                                                    <?php $singerNum = 1; ?>
                                                     <?php foreach ($goodSingers as $singer): ?>
-                                                        <li><?php echo htmlspecialchars($singer['full_name']); ?></li>
+                                                        <li><?php echo $singerNum; ?>. <?php echo htmlspecialchars($singer['full_name']); ?></li>
+                                                    <?php $singerNum++; ?>
                                                     <?php endforeach; ?>
                                                 </ul>
                                             </div>
@@ -108,8 +110,10 @@ $recentLogs = $pdo->query("
                                             <div class="level-group">
                                                 <h5>Average / Developing:</h5>
                                                 <ul>
+                                                    <?php $singerNum = 1; ?>
                                                     <?php foreach ($normalSingers as $singer): ?>
-                                                        <li><?php echo htmlspecialchars($singer['full_name']); ?></li>
+                                                        <li><?php echo $singerNum; ?>. <?php echo htmlspecialchars($singer['full_name']); ?></li>
+                                                    <?php $singerNum++; ?>
                                                     <?php endforeach; ?>
                                                 </ul>
                                             </div>

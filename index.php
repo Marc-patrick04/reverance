@@ -166,23 +166,25 @@ try {
                     ?>
                     <div class="group">
                         <h4><?php echo htmlspecialchars($groupName); ?> <small>(<?php echo $formattedDate; ?>)</small></h4>
-                        <div class="voice-categories">
-                            <?php
-                            $voices = ['Soprano', 'Alto', 'Tenor', 'Bass'];
-                            foreach ($voices as $voice):
-                                $voiceSingers = array_filter($singers, function($s) use ($voice) {
-                                    return $s['voice_category'] === $voice;
-                                });
-                            ?>
-                                <div class="voice-category">
-                                    <h5><?php echo $voice; ?> <span class="count">(<?php echo count($voiceSingers); ?>)</span></h5>
-                                    <ul>
-                                        <?php foreach ($voiceSingers as $singer): ?>
-                                            <li><?php echo htmlspecialchars($singer['full_name']); ?> </li>
+                                    <div class="voice-categories">
+                                        <?php
+                                        $voices = ['Soprano', 'Alto', 'Tenor', 'Bass'];
+                                        foreach ($voices as $voice):
+                                            $voiceSingers = array_filter($singers, function($s) use ($voice) {
+                                                return $s['voice_category'] === $voice;
+                                            });
+                                        ?>
+                                            <div class="voice-category">
+                                                <h5><?php echo $voice; ?> <span class="count">(<?php echo count($voiceSingers); ?>)</span></h5>
+                                                <ul>
+                                                    <?php $singerNum = 1; ?>
+                                                    <?php foreach ($voiceSingers as $singer): ?>
+                                                        <li><?php echo $singerNum; ?>. <?php echo htmlspecialchars($singer['full_name']); ?> </li>
+                                                    <?php $singerNum++; ?>
+                                                    <?php endforeach; ?>
+                                                </ul>
+                                            </div>
                                         <?php endforeach; ?>
-                                    </ul>
-                                </div>
-                            <?php endforeach; ?>
                         </div>
                     </div>
                     <?php endforeach; ?>
@@ -191,8 +193,8 @@ try {
         <?php else: ?>
             <section class="groups-section">
                 <div class="no-groups-message">
-                    <h3>🎵 Welcome to Our Choir Management System</h3>
-                    <p>Groups will be displayed here once the administrator creates and publishes choir assignments for upcoming services.</p>
+                    <h3> Welcome to Our Choir Management System</h3>
+                    <p>Groups will be displayed here once the administrator creates and publishes </p>
                 </div>
             </section>
         <?php endif; ?>
@@ -201,9 +203,9 @@ try {
     <footer>
         <div class="footer-content">
             <div class="footer-brand">
-                <img src="assets/Logo Reverence-Photoroom.png" alt="Reverence WorshipTeam Logo" class="footer-logo">
+             
                 <h3>Reverence WorshipTeam</h3>
-                <p>Creating harmonious gospel choir formations through intelligent, fair, and transparent assignment algorithms.</p>
+               
             </div>
 
             <div class="footer-section footer-scripture">
@@ -213,13 +215,7 @@ try {
                 </blockquote>
             </div>
 
-            <div class="footer-section">
-                <h4>System Features</h4>
-                <p>• Intelligent Voice Balancing</p>
-                <p>• Fair Group Assignments</p>
-                <p>• Monthly Service Planning</p>
-                <p>• Complete Transparency</p>
-            </div>
+            
 
             <div class="footer-section">
                 <h4>Contact Information</h4>

@@ -70,7 +70,7 @@ $activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active 
                 <a href="groups.php">Manage Groups</a>
                 <a href="reports.php">Reports</a>
                 <a href="images.php">Manage Images</a>
-                <a href="logs.php">View Logs</a>
+                <a href="settings.php">Settings</a>
                 <a href="../logout.php">Logout</a>
             </nav>
         </div>
@@ -104,12 +104,7 @@ $activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active 
                             <small><?php echo $totalGroups; ?> total created</small>
                         </div>
 
-                        <div class="dashboard-card secondary">
-                            <div class="card-icon"></div>
-                            <h3><?php echo $logCount; ?></h3>
-                            <p>Today's Activity</p>
-                            <small><?php echo $totalLogs; ?> total logged</small>
-                        </div>
+                        
 
                         <div class="dashboard-card secondary">
                             <div class="card-icon"></div>
@@ -213,10 +208,7 @@ $activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active 
                             <span class="action-icon"></span>
                             <span>Manage Images</span>
                         </a>
-                        <a href="logs.php" class="action-btn secondary">
-                            <span class="action-icon"></span>
-                            <span>View Logs</span>
-                        </a>
+
                         <a href="singers.php" class="action-btn info">
                             <span class="action-icon"></span>
                             <span>Manage Singers</span>
@@ -253,13 +245,12 @@ $activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active 
                 <p><a href="dashboard.php">Dashboard</a></p>
                 <p><a href="singers.php">Manage Singers</a></p>
                 <p><a href="groups.php">Manage Groups</a></p>
-                <p><a href="logs.php">View Logs</a></p>
             </div>
 
             <div class="footer-section">
                 <h4>Support</h4>
                 <p><strong>Email:</strong><br>worshipteamkicukiro@gmail.com</p>
-                <p><strong>Admin Access:</strong><br>admin / admin123</p>
+           
                 <p><a href="../index.php">← Back to Site</a></p>
             </div>
         </div>
@@ -267,7 +258,7 @@ $activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active 
         <div class="footer-bottom">
             <div class="copyright">
                 <p>&copy; 2026 Reverence WorshipTeam. All rights reserved.</p>
-                <p>Made with <span class="heart">❤️</span> for gospel ministry</p>
+              
             </div>
         </div>
     </footer>

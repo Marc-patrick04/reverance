@@ -336,7 +336,6 @@ $inactiveSingers = $pdo->query("SELECT COUNT(*) FROM singers WHERE status = 'Ina
                 <a href="groups.php">Manage Groups</a>
                 <a href="reports.php">Reports</a>
                 <a href="images.php">Manage Images</a>
-                <a href="logs.php">View Logs</a>
                 <a href="../logout.php">Logout</a>
             </nav>
         </div>
@@ -596,9 +595,11 @@ $inactiveSingers = $pdo->query("SELECT COUNT(*) FROM singers WHERE status = 'Ina
                                 </tr>
                             </thead>
                             <tbody>
+                                <?php $singerCounter = 1; ?>
                                 <?php foreach ($singers as $singer): ?>
                                     <tr>
-                                        <td><?php echo htmlspecialchars($singer['full_name']); ?></td>
+                                        <td><?php echo $singerCounter; ?>. <?php echo htmlspecialchars($singer['full_name']); ?></td>
+                                    <?php $singerCounter++; ?>
                                         <td><?php echo htmlspecialchars($singer['voice_category']); ?></td>
                                         <td><?php echo htmlspecialchars($singer['voice_level']); ?></td>
                                         <td><?php echo htmlspecialchars($singer['status']); ?></td>
@@ -623,9 +624,9 @@ $inactiveSingers = $pdo->query("SELECT COUNT(*) FROM singers WHERE status = 'Ina
     <footer>
         <div class="footer-content">
             <div class="footer-brand">
-                <img src="../assets/Logo Reverence-Photoroom.png" alt="Reverence WorshipTeam Logo" class="footer-logo">
+                
                 <h3>Reverence WorshipTeam</h3>
-                <p>Singer Management - Building harmonious gospel voices through fair and transparent assignments.</p>
+               
             </div>
 
             <div class="footer-section footer-scripture">
@@ -655,7 +656,7 @@ $inactiveSingers = $pdo->query("SELECT COUNT(*) FROM singers WHERE status = 'Ina
         <div class="footer-bottom">
             <div class="copyright">
                 <p>&copy; 2026 Reverence WorshipTeam. All rights reserved.</p>
-                <p>Made with <span class="heart">❤️</span> for gospel ministry</p>
+              
             </div>
         </div>
     </footer>

@@ -184,7 +184,7 @@ function createGroups($groupCount, $groupNames, $serviceDate, $mixingMethod) {
             $serviceOrder = $index + 1;
             $stmt = $pdo->prepare("
                 INSERT INTO groups (name, service_date, service_order, is_published, created_by)
-                VALUES (?, ?, ?, true, ?)
+                VALUES (?, ?, ?, false, ?)
             ");
             $stmt->execute([$name, $serviceDate, $serviceOrder, $_SESSION['user_id']]);
             $groupIds[] = $pdo->lastInsertId();
@@ -199,7 +199,7 @@ function createGroups($groupCount, $groupNames, $serviceDate, $mixingMethod) {
         }
 
         $pdo->commit();
-        setMessage("✅ Groups created successfully! {$assignedSingers} singers assigned across {$groupCount} groups.");
+        setMessage("✅ Groups created successfully! {$assignedSingers} singers assigned across {$groupCount} groups. Groups are saved as drafts - publish them when ready.");
         logAction('create_groups', "Created {$groupCount} groups for {$serviceDate}: " . implode(', ', $groupNames));
         return true;
 
@@ -431,13 +431,97 @@ function distributeSingersRandomly($singerIds, $currentAssignments) {
     $numGroups = count($currentAssignments);
     $singerIds = array_values($singerIds);
 
-    // Get singer details to separate by skill level
+    global $pdo;
+
+    // Get previous published groups and their singers for mixing
+    $previousGroups = [];
+    try {
+        $stmt = $pdo->query("SELECT id, name FROM groups WHERE is_published = true ORDER BY service_date DESC LIMIT 5");
+        $publishedGroups = $stmt->fetchAll();
+
+        foreach ($publishedGroups as $group) {
+            $stmt = $pdo->prepare("SELECT singer_id FROM group_assignments WHERE group_id = ?");
+            $stmt->execute([$group['id']]);
+            $groupSingers = array_column($stmt->fetchAll(), 'singer_id');
+            $previousGroups[$group['name']] = $groupSingers;
+        }
+    } catch (PDOException $e) {
+        // If database error, fall back to simple random
+        $previousGroups = [];
+    }
+
+    $result = array_fill(0, $numGroups, []);
+
+    // If no previous groups exist, do simple random distribution
+    if (empty($previousGroups)) {
+        // Separate by skill level for quality balance
+        $goodSingers = [];
+        $normalSingers = [];
+
+        foreach ($singerIds as $singerId) {
+            $stmt = $pdo->prepare("SELECT voice_level FROM singers WHERE id = ?");
+            $stmt->execute([$singerId]);
+            $singer = $stmt->fetch();
+            if ($singer) {
+                if ($singer['voice_level'] === 'Good') {
+                    $goodSingers[] = $singerId;
+                } else {
+                    $normalSingers[] = $singerId;
+                }
+            }
+        }
+
+        // Distribute Good singers evenly across all groups first
+        shuffle($goodSingers);
+        $goodIndex = 0;
+        foreach ($goodSingers as $singerId) {
+            $groupIndex = $goodIndex % $numGroups;
+            $result[$groupIndex][] = $singerId;
+            $goodIndex++;
+        }
+
+        // Distribute Normal singers evenly across groups
+        shuffle($normalSingers);
+        $normalIndex = 0;
+        foreach ($normalSingers as $singerId) {
+            $groupIndex = $normalIndex % $numGroups;
+            $result[$groupIndex][] = $singerId;
+            $normalIndex++;
+        }
+
+        return $result;
+    }
+
+    // Step 1: Process previous groups and collect singers to potentially move
+    $singersToPotentiallyMove = [];
+    foreach ($previousGroups as $groupName => $groupSingers) {
+        if (empty($groupSingers)) continue;
+        $singersToPotentiallyMove = array_merge($singersToPotentiallyMove, $groupSingers);
+    }
+
+    // Step 2: Move approximately half of singers from previous groups for better mixing
+    $movedSingers = [];
+    $totalPreviousSingers = count($singersToPotentiallyMove);
+
+    if ($totalPreviousSingers > 0) {
+        $moveCount = max(1, intval($totalPreviousSingers / 2)); // Move at least 1, ideally half
+
+        // Shuffle to randomize who moves
+        shuffle($singersToPotentiallyMove);
+
+        // Take the first half to move
+        $movedSingers = array_slice($singersToPotentiallyMove, 0, $moveCount);
+    }
+
+    // Step 3: All singers (both moved and staying) need to be redistributed
+    // This ensures ALL singers are assigned to new groups
+    $allSingersToDistribute = $singerIds; // Start with ALL active singers
+
+    // Step 4: Separate by skill level for quality balance
     $goodSingers = [];
     $normalSingers = [];
 
-    // Query to get singer details
-    global $pdo;
-    foreach ($singerIds as $singerId) {
+    foreach ($allSingersToDistribute as $singerId) {
         $stmt = $pdo->prepare("SELECT voice_level FROM singers WHERE id = ?");
         $stmt->execute([$singerId]);
         $singer = $stmt->fetch();
@@ -450,10 +534,8 @@ function distributeSingersRandomly($singerIds, $currentAssignments) {
         }
     }
 
-    $result = $currentAssignments;
-
-    // Step 1: Distribute Good singers evenly across all groups first
-    shuffle($goodSingers); // Randomize order of good singers
+    // Step 5: Distribute Good singers evenly across all groups first
+    shuffle($goodSingers);
     $goodIndex = 0;
     foreach ($goodSingers as $singerId) {
         $groupIndex = $goodIndex % $numGroups;
@@ -461,8 +543,8 @@ function distributeSingersRandomly($singerIds, $currentAssignments) {
         $goodIndex++;
     }
 
-    // Step 2: Distribute Normal singers randomly across remaining spots
-    shuffle($normalSingers); // Randomize order of normal singers
+    // Step 6: Distribute Normal singers evenly across groups
+    shuffle($normalSingers);
     $normalIndex = 0;
     foreach ($normalSingers as $singerId) {
         $groupIndex = $normalIndex % $numGroups;
@@ -516,7 +598,6 @@ function getServiceTimeDisplay($serviceOrder) {
                 <a href="groups.php" class="active">Manage Groups</a>
                 <a href="reports.php">Reports</a>
                 <a href="images.php">Manage Images</a>
-                <a href="logs.php">View Logs</a>
                 <a href="../logout.php">Logout</a>
             </nav>
         </div>
@@ -684,6 +765,46 @@ function getServiceTimeDisplay($serviceOrder) {
                             $stmt->execute([$viewGroup['id']]);
                             $groupSingers = $stmt->fetchAll();
 
+                            // Get previous group information for each singer and check if they stayed in same group
+                            $singerPreviousGroups = [];
+                            $singerStayedSameGroup = [];
+                            foreach ($groupSingers as $singer) {
+                                // Get all historical group assignments for this singer
+                                $stmt = $pdo->prepare("
+                                    SELECT g.name as group_name
+                                    FROM groups g
+                                    JOIN group_assignments ga ON g.id = ga.group_id
+                                    WHERE ga.singer_id = ?
+                                    ORDER BY g.service_date ASC
+                                ");
+                                $stmt->execute([$singer['id']]);
+                                $allAssignments = $stmt->fetchAll(PDO::FETCH_COLUMN, 0);
+
+                                // Check if singer has been in the same group for all assignments
+                                $uniqueGroups = array_unique($allAssignments);
+                                $hasStayedSameGroup = count($uniqueGroups) === 1 && count($allAssignments) > 1;
+
+                                // Get most recent previous group
+                                $previousGroup = null;
+                                if (count($allAssignments) > 1) {
+                                    // Find the most recent assignment before current group
+                                    $stmt = $pdo->prepare("
+                                        SELECT g.name as group_name
+                                        FROM groups g
+                                        JOIN group_assignments ga ON g.id = ga.group_id
+                                        WHERE ga.singer_id = ? AND g.service_date < ?
+                                        ORDER BY g.service_date DESC
+                                        LIMIT 1
+                                    ");
+                                    $stmt->execute([$singer['id'], $viewGroup['service_date']]);
+                                    $prevResult = $stmt->fetch();
+                                    $previousGroup = $prevResult ? $prevResult['group_name'] : null;
+                                }
+
+                                $singerPreviousGroups[$singer['id']] = $previousGroup;
+                                $singerStayedSameGroup[$singer['id']] = $hasStayedSameGroup;
+                            }
+
                             $voiceData = [];
                             foreach ($groupSingers as $singer) {
                                 $voiceData[$singer['voice_category']][] = $singer;
@@ -697,12 +818,18 @@ function getServiceTimeDisplay($serviceOrder) {
                             ?>
                                 <div class="voice-category">
                                     <h5><?php echo $voice; ?> <span class="count">(<?php echo count($singers); ?>)</span></h5>
-                                    <?php if (!empty($singers)): ?>
+                        <?php if (!empty($singers)): ?>
                                         <div class="singer-list">
-                                            <?php foreach ($singers as $singer): ?>
+                                            <?php $singerCounter = 1; ?>
+                                            <?php foreach ($singers as $singer):
+                                                $previousGroup = $singerPreviousGroups[$singer['id']];
+                                                $hasStayedSameGroup = $singerStayedSameGroup[$singer['id']] ?? false;
+                                                $previousText = $previousGroup ? " - " . ($hasStayedSameGroup ? "<strong style='color: #dc3545;'>Previously: {$previousGroup}</strong>" : "Previously: {$previousGroup}") : "";
+                                            ?>
                                                 <div class="singer-item <?php echo strtolower($singer['voice_level']); ?>">
-                                                    <span class="singer-name"><?php echo htmlspecialchars($singer['full_name']); ?> (<?php echo $singer['voice_level']; ?>)</span>
+                                                    <span class="singer-name"><?php echo $singerCounter; ?>. <?php echo htmlspecialchars($singer['full_name']); ?> (<?php echo $singer['voice_level']; ?>)<?php echo $previousText; ?></span>
                                                 </div>
+                                            <?php $singerCounter++; ?>
                                             <?php endforeach; ?>
                                         </div>
                                         <div class="voice-stats">
@@ -804,15 +931,15 @@ function getServiceTimeDisplay($serviceOrder) {
                                 <thead>
                                     <tr>
                                         <th>Group Name</th>
-                                        <th>Service Date</th>
+                                        <th>Date</th>
                                         <th>Singers</th>
-                                        <th>Created</th>
                                         <th>Creator</th>
                                         <th>Status</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
+                                    <?php $historyCounter = 1; ?>
                                     <?php foreach ($allGroups as $group):
                                         // Count singers in this group
                                         $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM group_assignments WHERE group_id = ?");
@@ -820,10 +947,9 @@ function getServiceTimeDisplay($serviceOrder) {
                                         $singerCount = $stmt->fetch()['count'];
                                     ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($group['name']); ?></td>
+                                            <td><?php echo $historyCounter++; ?>. <?php echo htmlspecialchars($group['name']); ?></td>
                                             <td><?php echo date('M j, Y', strtotime($group['service_date'] ?? $group['created_at'])); ?></td>
                                             <td><?php echo $singerCount; ?> singers</td>
-                                            <td><?php echo date('Y-m-d H:i', strtotime($group['created_at'])); ?></td>
                                             <td><?php echo htmlspecialchars($group['creator'] ?: 'System'); ?></td>
                                             <td>
                                                 <span class="status-badge status-<?php echo $group['is_published'] ? 'published' : 'draft'; ?>">
@@ -864,6 +990,7 @@ function getServiceTimeDisplay($serviceOrder) {
                             </div>
                         <?php else: ?>
                             <div class="groups-grid">
+                                <?php $groupCounter = 1; ?>
                                 <?php foreach ($publishedGroups as $group):
                                     // Count singers in this group
                                     $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM group_assignments WHERE group_id = ?");
@@ -872,7 +999,7 @@ function getServiceTimeDisplay($serviceOrder) {
                                 ?>
                                     <div class="group-card">
                                         <div class="group-card-header">
-                                            <h4><?php echo htmlspecialchars($group['name']); ?></h4>
+                                            <h4><?php echo $groupCounter; ?>. <?php echo htmlspecialchars($group['name']); ?></h4>
                                             <span class="service-order"><?php echo getServiceTimeDisplay($group['service_order']); ?></span>
                                         </div>
                                         <div class="group-card-meta">
@@ -888,6 +1015,7 @@ function getServiceTimeDisplay($serviceOrder) {
                                             </form>
                                         </div>
                                     </div>
+                                <?php $groupCounter++; ?>
                                 <?php endforeach; ?>
                             </div>
                         <?php endif; ?>
@@ -900,9 +1028,9 @@ function getServiceTimeDisplay($serviceOrder) {
     <footer>
         <div class="footer-content">
             <div class="footer-brand">
-                <img src="../assets/Logo Reverence-Photoroom.png" alt="Reverence WorshipTeam Logo" class="footer-logo">
+               
                 <h3>Reverence WorshipTeam</h3>
-                <p>Group Management - Creating balanced gospel choir formations through intelligent algorithms.</p>
+   
             </div>
 
             <div class="footer-section footer-scripture">
@@ -920,19 +1048,13 @@ function getServiceTimeDisplay($serviceOrder) {
                 <p><a href="dashboard.php">← Back to Dashboard</a></p>
             </div>
 
-            <div class="footer-section">
-                <h4>Algorithm Features</h4>
-                <p>• Quality Balance</p>
-                <p>• Voice Distribution</p>
-                <p>• Size Optimization</p>
-                <p>• Fair Assignments</p>
-            </div>
+            
         </div>
 
         <div class="footer-bottom">
             <div class="copyright">
                 <p>&copy; 2026 Reverence WorshipTeam. All rights reserved.</p>
-                <p>Made with <span class="heart">❤️</span> for gospel ministry</p>
+                
             </div>
         </div>
     </footer>

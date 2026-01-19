@@ -99,28 +99,45 @@ body {
     background: rgba(0, 0, 0, 0.8);
     backdrop-filter: blur(10px);
     padding: 1rem 2rem;
-    border-bottom: 3px solid var(--accent-yellow);
+    border-bottom: 3px solid var(--primary-white);
     position: relative;
 }
 
 .welcome-header .header-content {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 2rem;
+    justify-content: space-between;
     max-width: 1200px;
     margin: 0 auto;
+    position: relative;
 }
 
 .welcome-header .logo-container {
     flex-shrink: 0;
+    position: absolute;
+    left: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.welcome-header .title-container {
+    flex: 1;
+    text-align: center;
+    margin: 0 120px;
+    /* Account for logo width + padding */
 }
 
 .welcome-header .logo {
-    height: 60px;
+    height: 100px;
     width: auto;
-    filter: drop-shadow(0 2px 4px rgba(255, 215, 0, 0.3));
+    transition: all 0.4s ease;
+    border-radius: 10px;
+    padding: 0.5rem;
+    transform: scale(2.05);
+
 }
+
+
 
 .welcome-header .title-container h1 {
     margin-bottom: 0.25rem;
@@ -149,7 +166,7 @@ body {
     color: var(--primary-white);
     text-decoration: none;
     padding: 0.5rem 1rem;
-    border: 2px solid var(--accent-yellow);
+    border: 2px solid white;
     border-radius: 4px;
     transition: all 0.3s ease;
     background: transparent;

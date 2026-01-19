@@ -194,9 +194,8 @@ $images = $pdo->query("SELECT * FROM landing_images ORDER BY created_at DESC")->
                 <a href="dashboard.php">Dashboard</a>
                 <a href="singers.php">Manage Singers</a>
                 <a href="groups.php">Manage Groups</a>
-                <a href="images.php" class="active">Manage Images</a>
                 <a href="reports.php">Reports</a>
-                <a href="logs.php">View Logs</a>
+                <a href="images.php" class="active">Manage Images</a>
 
                 <a href="../logout.php">Logout</a>
             </nav>
@@ -271,9 +270,9 @@ $images = $pdo->query("SELECT * FROM landing_images ORDER BY created_at DESC")->
     <footer>
         <div class="footer-content">
             <div class="footer-brand">
-                <img src="../assets/Logo Reverence-Photoroom.png" alt="Reverence WorshipTeam Logo" class="footer-logo">
+              
                 <h3>Reverence WorshipTeam</h3>
-                <p>Image Management - Showcasing gospel choir ministry through visual storytelling.</p>
+               
             </div>
 
             <div class="footer-section footer-scripture">
@@ -303,7 +302,7 @@ $images = $pdo->query("SELECT * FROM landing_images ORDER BY created_at DESC")->
         <div class="footer-bottom">
             <div class="copyright">
                 <p>&copy; 2026 Reverence WorshipTeam. All rights reserved.</p>
-                <p>Made with <span class="heart">❤️</span> for gospel ministry</p>
+                
             </div>
         </div>
     </footer>

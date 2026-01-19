@@ -170,8 +170,9 @@ The system uses a sophisticated algorithm to ensure fair group divisions:
 │   ├── dashboard.php      # Admin overview
 │   ├── singers.php        # Singer management
 │   ├── groups.php         # Group creation
+│   ├── reports.php        # Report generation
 │   ├── images.php         # Image management
-│   └── logs.php           # Activity logs
+│   ├── settings.php       # Account settings
 ├── viewer/
 │   └── groups.php         # Group viewing
 ├── css/
@@ -181,16 +182,6 @@ The system uses a sophisticated algorithm to ensure fair group divisions:
 └── uploads/
     └── images/            # Uploaded images
 ```
-
-## Philosophy
-
-**Fairness, balance, transparency, worship-first**
-
-- No favoritism in group assignments
-- One sound. One team.
-- Complete accountability
-- Inclusive and fair processes
-
 ## Support
 
 For technical support or questions about the system, please contact your system administrator.

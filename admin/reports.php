@@ -32,7 +32,6 @@ $message = '';
                 <a href="groups.php">Manage Groups</a>
                 <a href="reports.php" class="active">Reports</a>
                 <a href="images.php">Manage Images</a>
-                <a href="logs.php">View Logs</a>
                 <a href="../logout.php">Logout</a>
             </nav>
         </div>
@@ -55,6 +54,9 @@ $message = '';
                     </a>
                     <a href="reports.php?report_type=monthly" class="nav-tab <?php echo isset($_GET['report_type']) && $_GET['report_type'] === 'monthly' ? 'active' : ''; ?>">
                         📊 Monthly Reports
+                    </a>
+                    <a href="reports.php?report_type=mixing" class="nav-tab <?php echo isset($_GET['report_type']) && $_GET['report_type'] === 'mixing' ? 'active' : ''; ?>">
+                        🔄 Mixing Tracking
                     </a>
                 </div>
 
@@ -88,7 +90,7 @@ $message = '';
                             FROM singers s
                             JOIN group_assignments ga ON s.id = ga.singer_id
                             JOIN groups g ON ga.group_id = g.id
-                            WHERE s.full_name LIKE ?
+                            WHERE s.full_name ILIKE ?
                             ORDER BY g.service_date DESC, g.service_order
                         ");
                         $stmt->execute([$searchName]);
@@ -98,6 +100,7 @@ $message = '';
                         <h5>Assignments for: "<?php echo htmlspecialchars($_GET['search_singer']); ?>"</h5>
                         <div class="export-actions">
                             <button onclick="previewReport('singer-search-report')" class="btn export-btn preview-btn"> Preview</button>
+                            <button onclick="exportToExcel('singer', '<?php echo htmlspecialchars($_GET['search_singer']); ?>')" class="btn export-btn excel-btn">📊 Export Excel</button>
                             <button onclick="downloadReport('singer-search-report', 'Singer_Assignments_<?php echo htmlspecialchars(str_replace(' ', '_', $_GET['search_singer'])); ?>')" class="btn export-btn pdf-btn">📄 Download PDF</button>
                         </div>
                         <?php if (!empty($singerAssignments)): ?>
@@ -173,6 +176,7 @@ $message = '';
                         <h5>Daily Report for: <?php echo date('l, F j, Y', strtotime($reportDate)); ?></h5>
                         <div class="export-actions">
                             <button onclick="previewReport('daily-report')" class="btn export-btn preview-btn"> Preview</button>
+                            <button onclick="exportToExcel('daily', '<?php echo $reportDate; ?>')" class="btn export-btn excel-btn">📊 Export Excel</button>
                             <button onclick="downloadReport('daily-report', 'Daily_Report_<?php echo date('Y-m-d', strtotime($reportDate)); ?>')" class="btn export-btn pdf-btn">📄 Download PDF</button>
                         </div>
                         <?php if (!empty($dateReport)): ?>
@@ -258,24 +262,11 @@ $message = '';
 
                         <div class="export-actions">
                             <button onclick="previewReport('monthly-report')" class="btn export-btn preview-btn"> Preview</button>
+                            <button onclick="exportToExcel('monthly', '<?php echo $reportMonth; ?>')" class="btn export-btn excel-btn">📊 Export Excel</button>
                             <button onclick="downloadReport('monthly-report', 'Monthly_Report_<?php echo date('Y-m', strtotime($reportMonth . '-01')); ?>')" class="btn export-btn pdf-btn">📄 Download PDF</button>
                         </div>
 
-                        <!-- Monthly Summary -->
-                        <div id="monthly-report" class="monthly-summary" style="margin-bottom: 2rem;">
-                            <h6>Monthly Summary</h6>
-                            <div class="summary-grid">
-                                <div class="summary-item">
-                                    <strong>Total Days with Groups:</strong> <?php echo count($monthlyStats); ?>
-                                </div>
-                                <div class="summary-item">
-                                    <strong>Total Groups Created:</strong> <?php echo count($monthlyGroups); ?>
-                                </div>
-                                <div class="summary-item">
-                                    <strong>Total Singer Assignments:</strong> <?php echo array_sum(array_column($monthlyStats, 'singer_count')); ?>
-                                </div>
-                            </div>
-                        </div>
+            
 
                         <!-- Detailed Daily Breakdown -->
                         <?php if (!empty($monthlyStats)): ?>
@@ -284,13 +275,13 @@ $message = '';
                             // Get detailed daily information
                             $stmt = $pdo->prepare("
                                 SELECT DATE(g.service_date) as service_date,
-                                       g.name as group_name, g.id as group_id,
+                                       g.name as group_name, g.id as group_id, g.service_order,
                                        s.full_name, s.voice_category, s.voice_level
                                 FROM groups g
                                 JOIN group_assignments ga ON g.id = ga.group_id
                                 JOIN singers s ON ga.singer_id = s.id
                                 WHERE TO_CHAR(g.service_date, 'YYYY-MM') = ?
-                                ORDER BY g.service_date, g.name, s.voice_category, s.voice_level DESC
+                                ORDER BY g.service_date, g.service_order, g.name, s.voice_category, s.voice_level DESC
                             ");
                             $stmt->execute([$reportMonth]);
                             $detailedDaily = $stmt->fetchAll();
@@ -334,6 +325,7 @@ $message = '';
                                                         <tr>
                                                             <th>Singer Name</th>
                                                             <th>Voice Category</th>
+                                                            <th>Voice Level</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
@@ -341,6 +333,7 @@ $message = '';
                                                             <tr>
                                                                 <td><?php echo htmlspecialchars($singer['full_name']); ?></td>
                                                                 <td><?php echo htmlspecialchars($singer['voice_category']); ?></td>
+                                                                <td><?php echo htmlspecialchars($singer['voice_level']); ?></td>
                                                             </tr>
                                                         <?php endforeach; ?>
                                                     </tbody>
@@ -376,6 +369,222 @@ $message = '';
                         <?php else: ?>
                             <p>No groups found for this month.</p>
                         <?php endif; ?>
+                    <?php endif; ?>
+                </div>
+                <?php elseif ($report_type === 'mixing'): ?>
+                <!-- Mixing Tracking Report -->
+                <div class="form-container">
+                    <h4>🔄 Mixing Tracking - Singer Movement Analysis</h4>
+                    <p class="description">Track how singers move between groups over time. Shows movement patterns and group stability.</p>
+
+                    <?php
+                    // Get all created groups ordered by date
+                    $stmt = $pdo->query("
+                        SELECT g.id, g.name, g.service_date, COUNT(ga.singer_id) as singer_count
+                        FROM groups g
+                        LEFT JOIN group_assignments ga ON g.id = ga.group_id
+                        GROUP BY g.id, g.name, g.service_date
+                        ORDER BY g.service_date DESC, g.service_order ASC
+                    ");
+                    $allGroups = $stmt->fetchAll();
+
+                    // Group by date for easier processing
+                    $groupsByDate = [];
+                    foreach ($allGroups as $group) {
+                        $dateKey = $group['service_date'];
+                        $groupsByDate[$dateKey][] = $group;
+                    }
+
+                    // Sort dates chronologically
+                    ksort($groupsByDate);
+
+                    $mixingData = [];
+                    $previousAssignments = null;
+                    $previousDate = null;
+
+                    foreach ($groupsByDate as $date => $dateGroups) {
+                        if ($previousAssignments !== null && $previousDate !== null) {
+                            // Compare current with previous
+                            $currentAssignments = [];
+
+                            // Get singers for current date groups
+                            foreach ($dateGroups as $group) {
+                                $stmt = $pdo->prepare("
+                                    SELECT ga.singer_id, s.full_name, g.name as group_name
+                                    FROM group_assignments ga
+                                    JOIN singers s ON ga.singer_id = s.id
+                                    JOIN groups g ON ga.group_id = g.id
+                                    WHERE ga.group_id = ?
+                                ");
+                                $stmt->execute([$group['id']]);
+                                $currentAssignments[$group['name']] = array_column($stmt->fetchAll(), 'singer_id');
+                            }
+
+                            // Calculate movements
+                            $movements = [];
+                            $groupSummary = [];
+
+                            // For each previous group
+                            foreach ($previousAssignments as $prevGroupName => $prevSingers) {
+                                $groupSummary[$prevGroupName] = [
+                                    'total' => count($prevSingers),
+                                    'moved' => 0,
+                                    'stayed' => 0
+                                ];
+
+                                // Check where each singer went
+                                foreach ($prevSingers as $singerId) {
+                                    $foundInCurrent = false;
+                                    foreach ($currentAssignments as $currGroupName => $currSingers) {
+                                        if (in_array($singerId, $currSingers)) {
+                                            if ($prevGroupName !== $currGroupName) {
+                                                // Singer moved to different group
+                                                $movements[] = [
+                                                    'date' => $date,
+                                                    'from_group' => $prevGroupName,
+                                                    'to_group' => $currGroupName,
+                                                    'singer_id' => $singerId,
+                                                    'moved' => true
+                                                ];
+                                                $groupSummary[$prevGroupName]['moved']++;
+                                            } else {
+                                                // Singer stayed in same group
+                                                $groupSummary[$prevGroupName]['stayed']++;
+                                            }
+                                            $foundInCurrent = true;
+                                            break;
+                                        }
+                                    }
+
+                                    if (!$foundInCurrent) {
+                                        // Singer not found in current assignments (edge case)
+                                        $groupSummary[$prevGroupName]['stayed']++;
+                                    }
+                                }
+                            }
+
+                            $mixingData[] = [
+                                'from_date' => $previousDate,
+                                'to_date' => $date,
+                                'movements' => $movements,
+                                'group_summary' => $groupSummary,
+                                'total_movements' => count($movements)
+                            ];
+                        }
+
+                        // Prepare for next iteration
+                        $previousAssignments = [];
+                        foreach ($dateGroups as $group) {
+                            $stmt = $pdo->prepare("
+                                SELECT ga.singer_id
+                                FROM group_assignments ga
+                                WHERE ga.group_id = ?
+                            ");
+                            $stmt->execute([$group['id']]);
+                            $previousAssignments[$group['name']] = array_column($stmt->fetchAll(), 'singer_id');
+                        }
+                        $previousDate = $date;
+                    }
+                    ?>
+
+                    <h5>Mixing Tracking Report</h5>
+                    <div class="export-actions">
+                        <button onclick="previewReport('mixing-report')" class="btn export-btn preview-btn"> Preview</button>
+                        <button onclick="exportToExcel('mixing')" class="btn export-btn excel-btn">📊 Export Excel</button>
+                        <button onclick="downloadReport('mixing-report', 'Mixing_Tracking_Report')" class="btn export-btn pdf-btn">📄 Download PDF</button>
+                    </div>
+
+                    <?php if (!empty($mixingData)): ?>
+                        <div id="mixing-report" class="mixing-report">
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>From Group</th>
+                                            <th>To Group</th>
+                                            <th>Moved</th>
+                                            <th>Not Moved</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php
+                                        $allMovementRows = [];
+                                        foreach ($mixingData as $period) {
+                                            if (!empty($period['movements'])) {
+                                                // Group movements by from/to combination for this period
+                                                $movementSummary = [];
+                                                foreach ($period['movements'] as $movement) {
+                                                    $key = $movement['from_group'] . '→' . $movement['to_group'];
+                                                    if (!isset($movementSummary[$key])) {
+                                                        $movementSummary[$key] = [
+                                                            'from' => $movement['from_group'],
+                                                            'to' => $movement['to_group'],
+                                                            'moved' => 0
+                                                        ];
+                                                    }
+                                                    $movementSummary[$key]['moved']++;
+                                                }
+
+                                                // Calculate not moved for each from group
+                                                foreach ($movementSummary as $key => $summary) {
+                                                    $fromGroup = $summary['from'];
+                                                    $totalInGroup = $period['group_summary'][$fromGroup]['total'];
+                                                    $movedFromGroup = array_sum(array_column(array_filter($movementSummary, fn($m) => $m['from'] === $fromGroup), 'moved'));
+                                                    $movementSummary[$key]['not_moved'] = $totalInGroup - $movedFromGroup;
+                                                }
+
+                                                // Add to consolidated data after all calculations
+                                                foreach ($movementSummary as $key => $summary) {
+                                                    $dateLabel = date('d/m/Y', strtotime($period['from_date'])) . ' → ' . date('d/m/Y', strtotime($period['to_date']));
+                                                    $allMovementRows[] = [
+                                                        'date' => $dateLabel,
+                                                        'from' => $summary['from'],
+                                                        'to' => $summary['to'],
+                                                        'moved' => $summary['moved'],
+                                                        'not_moved' => $summary['not_moved']
+                                                    ];
+                                                }
+                                            }
+                                        }
+
+                                        // Sort by date descending
+                                        usort($allMovementRows, function($a, $b) {
+                                            return strtotime(explode(' → ', $b['date'])[0]) - strtotime(explode(' → ', $a['date'])[0]);
+                                        });
+
+                                        foreach ($allMovementRows as $row):
+                                        ?>
+                                            <tr>
+                                                <td><?php echo htmlspecialchars($row['date']); ?></td>
+                                                <td><?php echo htmlspecialchars($row['from']); ?></td>
+                                                <td><?php echo htmlspecialchars($row['to']); ?></td>
+                                                <td><?php echo $row['moved']; ?></td>
+                                                <td><?php echo $row['not_moved']; ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Overall Summary -->
+                            <div class="overall-summary" style="margin-top: 2rem; padding: 1.5rem; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
+                                <h6 style="margin-bottom: 1rem; color: #333;">Overall Summary</h6>
+                                <div class="summary-stats">
+                                    <div class="summary-item">
+                                        <strong>Total Movement Periods:</strong> <?php echo count($mixingData); ?>
+                                    </div>
+                                    <div class="summary-item">
+                                        <strong>Total Singer Movements:</strong> <?php echo array_sum(array_column($mixingData, 'total_movements')); ?>
+                                    </div>
+                                    <div class="summary-item">
+                                        <strong>Average Movements per Period:</strong> <?php echo count($mixingData) > 0 ? round(array_sum(array_column($mixingData, 'total_movements')) / count($mixingData), 1) : 0; ?>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php else: ?>
+                        <p>No mixing data available. Need at least two created group dates to track movements.</p>
                     <?php endif; ?>
                 </div>
                 <?php endif; ?>
@@ -430,9 +639,9 @@ $message = '';
     <footer>
         <div class="footer-content">
             <div class="footer-brand">
-                <img src="../assets/Logo Reverence-Photoroom.png" alt="Reverence WorshipTeam Logo" class="footer-logo">
+              
                 <h3>Reverence WorshipTeam</h3>
-                <p>Reports - Comprehensive analytics and singer assignment tracking.</p>
+            
             </div>
 
             <div class="footer-section footer-scripture">
@@ -447,6 +656,7 @@ $message = '';
                 <p>• Singer Assignment History</p>
                 <p>• Daily Group Reports</p>
                 <p>• Monthly Activity Summaries</p>
+                <p>• Mixing Tracking Analysis</p>
                 <p>• Performance Analytics</p>
             </div>
 
@@ -461,7 +671,7 @@ $message = '';
         <div class="footer-bottom">
             <div class="copyright">
                 <p>&copy; 2026 Reverence WorshipTeam. All rights reserved.</p>
-                <p>Made with <span class="heart">❤️</span> for gospel ministry</p>
+               
             </div>
         </div>
     </footer>
@@ -482,8 +692,6 @@ $message = '';
 
             // Get search criteria based on report type
             let criteriaText = '';
-            const urlParams = new URLSearchParams(window.location.search);
-            const reportType = urlParams.get('report_type') || 'singer';
 
             if (reportType === 'singer') {
                 const searchName = urlParams.get('search_singer');
@@ -647,22 +855,191 @@ $message = '';
             previewWindow.document.close();
         }
 
-        function downloadReport(reportId, fileName) {
-            // Get the report content
-            const reportElement = document.getElementById(reportId);
-            if (!reportElement) {
-                alert('Report content not found. Please generate a report first.');
+        function exportToExcel(reportType, param = '') {
+            // Get the table data based on report type
+            let tableData = [];
+            let fileName = '';
+
+            if (reportType === 'singer') {
+                const table = document.querySelector('#singer-search-report table');
+                if (!table) {
+                    alert('No data to export. Please generate a report first.');
+                    return;
+                }
+
+                // Extract table headers
+                const headers = Array.from(table.querySelectorAll('th')).map(th => th.textContent.trim());
+
+                // Extract table rows
+                const rows = Array.from(table.querySelectorAll('tbody tr')).map(tr => {
+                    return Array.from(tr.querySelectorAll('td')).map(td => {
+                        // Clean up any HTML and extra whitespace
+                        return td.textContent.replace(/\s+/g, ' ').trim();
+                    });
+                });
+
+                tableData = [headers, ...rows];
+                fileName = `Singer_Assignments_${param.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`;
+
+            } else if (reportType === 'daily') {
+                const table = document.querySelector('#daily-report table');
+                if (!table) {
+                    alert('No data to export. Please generate a report first.');
+                    return;
+                }
+
+                // Extract table headers
+                const headers = Array.from(table.querySelectorAll('th')).map(th => th.textContent.trim());
+
+                // Extract table rows
+                const rows = Array.from(table.querySelectorAll('tbody tr')).map(tr => {
+                    return Array.from(tr.querySelectorAll('td')).map(td => {
+                        // For daily reports, skip empty group cells
+                        const text = td.textContent.replace(/\s+/g, ' ').trim();
+                        return text || '';
+                    });
+                });
+
+                tableData = [headers, ...rows];
+                fileName = `Daily_Report_${param}_${new Date().toISOString().split('T')[0]}.csv`;
+
+            } else if (reportType === 'monthly') {
+                // For monthly reports, export ALL singer data from daily detail tables
+                const detailTables = document.querySelectorAll('.form-container .daily-detail-section .table-container table');
+                if (!detailTables || detailTables.length === 0) {
+                    alert('No detailed data to export. Please generate a report first.');
+                    return;
+                }
+
+                // Collect all singer data from daily detail tables
+                let allSingerData = [];
+                const headers = ['Date', 'Group', 'Singer Name', 'Voice Category', 'Voice Level'];
+
+                detailTables.forEach(table => {
+                    // Find the date from the parent section
+                    const dailySection = table.closest('.daily-detail-section');
+                    const dateHeading = dailySection.querySelector('h6');
+                    let sectionDate = '';
+                    if (dateHeading) {
+                        const dateText = dateHeading.textContent.trim();
+                        // Extract date from "Saturday, January 18, 2025" format
+                        const dateMatch = dateText.match(/(\w+,\s+\w+\s+\d+,\s+\d{4})/);
+                        sectionDate = dateMatch ? dateMatch[1] : dateText;
+                    }
+
+                    // Find the group name from the parent group-detail
+                    const groupDetail = table.closest('.group-detail');
+                    let groupName = '';
+                    if (groupDetail) {
+                        const groupHeading = groupDetail.querySelector('h6');
+                        if (groupHeading) {
+                            // Extract group name from "Group: Group Name (X singers)" format
+                            const groupMatch = groupHeading.textContent.match(/Group:\s*([^(\n]+)/);
+                            groupName = groupMatch ? groupMatch[1].trim() : groupHeading.textContent.trim();
+                        }
+                    }
+
+                    // Extract singer data from this table
+                    const rows = Array.from(table.querySelectorAll('tbody tr')).map(tr => {
+                        const cells = Array.from(tr.querySelectorAll('td')).map(td => {
+                            return td.textContent.replace(/\s+/g, ' ').trim();
+                        });
+
+                        if (cells.length >= 3) {
+                            return [
+                                sectionDate,           // Date
+                                groupName,             // Group
+                                cells[0] || '',        // Singer Name
+                                cells[1] || '',        // Voice Category
+                                cells[2] || ''         // Voice Level
+                            ];
+                        }
+                        return null;
+                    }).filter(row => row !== null);
+
+                    allSingerData = allSingerData.concat(rows);
+                });
+
+                if (allSingerData.length === 0) {
+                    alert('No singer data found to export.');
+                    return;
+                }
+
+                tableData = [headers, ...allSingerData];
+                fileName = `Monthly_Detailed_Report_${param}_${new Date().toISOString().split('T')[0]}.csv`;
+
+            } else if (reportType === 'mixing') {
+                const table = document.querySelector('#mixing-report table');
+                if (!table) {
+                    alert('No data to export. Please generate a report first.');
+                    return;
+                }
+
+                // Extract table headers
+                const headers = Array.from(table.querySelectorAll('th')).map(th => th.textContent.trim());
+
+                // Extract table rows
+                const rows = Array.from(table.querySelectorAll('tbody tr')).map(tr => {
+                    return Array.from(tr.querySelectorAll('td')).map(td => {
+                        return td.textContent.replace(/\s+/g, ' ').trim();
+                    });
+                });
+
+                tableData = [headers, ...rows];
+                fileName = `Mixing_Tracking_Report_${new Date().toISOString().split('T')[0]}.csv`;
+            }
+
+            if (tableData.length === 0) {
+                alert('No data available for export.');
                 return;
             }
 
-            // Get the report title
-            const titleElement = reportElement.previousElementSibling;
-            const reportTitle = titleElement ? titleElement.textContent : 'Report';
+            // Convert to CSV
+            const csvContent = tableData.map(row =>
+                row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')
+            ).join('\n');
 
-            // Get search criteria based on report type
-            let criteriaText = '';
+            // Create download link
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', fileName);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            // Clean up
+            URL.revokeObjectURL(url);
+            document.body.removeChild(link);
+        }
+
+        function downloadReport(reportId, fileName) {
+            // Get the report content
             const urlParams = new URLSearchParams(window.location.search);
             const reportType = urlParams.get('report_type') || 'singer';
+
+            let reportElement = null;
+            if (reportType !== 'monthly') {
+                reportElement = document.getElementById(reportId);
+                if (!reportElement) {
+                    alert('Report content not found. Please generate a report first.');
+                    return;
+                }
+            }
+
+            // Get the report title
+            let titleElement = null;
+            if (reportElement) {
+                titleElement = reportElement.previousElementSibling;
+            } else if (reportType === 'monthly') {
+                // For monthly, find the h5 title
+                titleElement = document.querySelector('.form-container h5');
+            }
+            const reportTitle = titleElement ? titleElement.textContent : 'Report';
+
+
 
             if (reportType === 'singer') {
                 const searchName = urlParams.get('search_singer');
@@ -683,7 +1060,7 @@ $message = '';
                 }
             }
 
-            // Collect all content for the report
+            // Collect all content for the report with consistent formatting
             let fullReportContent = '';
 
             if (reportType === 'monthly') {
@@ -697,34 +1074,56 @@ $message = '';
                     const exportActions = clonedContainer.querySelectorAll('.export-actions');
                     exportActions.forEach(action => action.remove());
 
-                    // Remove voice level column from monthly report tables
-                    const tables = clonedContainer.querySelectorAll('table');
-                    tables.forEach(table => {
-                        const headers = table.querySelectorAll('th');
-                        const rows = table.querySelectorAll('tr');
-
-                        // Check if this table has Voice Level column
-                        headers.forEach((header, index) => {
-                            if (header.textContent.trim() === 'Voice Level') {
-                                // Remove the Voice Level header
-                                header.remove();
-
-                                // Remove corresponding data cells from all rows
-                                rows.forEach(row => {
-                                    const cells = row.querySelectorAll('td, th');
-                                    if (cells[index]) {
-                                        cells[index].remove();
-                                    }
-                                });
-                            }
-                        });
-                    });
-
                     fullReportContent = clonedContainer.innerHTML;
                 }
             } else {
-                // For other reports, just use the specific report element
-                fullReportContent = reportElement.outerHTML;
+                // For other reports, wrap in consistent monthly-style formatting
+                if (reportElement) {
+                    // Create a container with monthly report styling
+                    const reportContainer = document.createElement('div');
+                    reportContainer.className = 'monthly-report-container';
+
+                    // Add a summary section like monthly reports
+                    const summaryDiv = document.createElement('div');
+                    summaryDiv.className = 'monthly-summary';
+                    summaryDiv.innerHTML = `
+                        <h6>Report Summary</h6>
+                        <div class="summary-grid">
+                            <div class="summary-item">
+                                <strong>Report Type:</strong> ${reportType.charAt(0).toUpperCase() + reportType.slice(1)} Report
+                            </div>
+                            <div class="summary-item">
+                                <strong>Generated:</strong> ${new Date().toLocaleDateString()}
+                            </div>
+                            <div class="summary-item">
+                                <strong>Records:</strong> ${reportElement.querySelectorAll('tbody tr').length}
+                            </div>
+                        </div>
+                    `;
+
+                    // Add the report content in a daily-detail-section style
+                    const detailSection = document.createElement('div');
+                    detailSection.className = 'daily-detail-section';
+                    detailSection.style.marginBottom = '2rem';
+                    detailSection.style.border = '1px solid #ddd';
+                    detailSection.style.borderRadius = '8px';
+                    detailSection.style.padding = '1rem';
+
+                    const reportTitle = document.createElement('h6');
+                    reportTitle.style.marginBottom = '1rem';
+                    reportTitle.style.color = '#333';
+                    reportTitle.style.borderBottom = '2px solid #ddd';
+                    reportTitle.style.paddingBottom = '0.5rem';
+                    reportTitle.textContent = reportTitle;
+
+                    detailSection.appendChild(reportTitle);
+                    detailSection.appendChild(reportElement.cloneNode(true));
+
+                    reportContainer.appendChild(summaryDiv);
+                    reportContainer.appendChild(detailSection);
+
+                    fullReportContent = reportContainer.innerHTML;
+                }
             }
 
             // Create print-friendly HTML for PDF generation
@@ -826,15 +1225,21 @@ $message = '';
                 </html>
             `;
 
-            // Open print dialog for PDF generation
-            const printWindow = window.open('', '_blank');
-            printWindow.document.write(printContent);
-            printWindow.document.close();
+            // Temporarily replace page content for printing
+            const originalContent = document.body.innerHTML;
+            const originalTitle = document.title;
 
-            // Trigger print dialog immediately for PDF saving
-            printWindow.onload = function() {
-                printWindow.print();
-            };
+            document.body.innerHTML = printContent;
+            document.title = `${reportTitle} - PDF`;
+
+            // Trigger print dialog
+            window.print();
+
+            // Restore original content after a short delay
+            setTimeout(() => {
+                document.body.innerHTML = originalContent;
+                document.title = originalTitle;
+            }, 1000);
         }
     </script>
 </body>
