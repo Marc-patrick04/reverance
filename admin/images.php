@@ -135,7 +135,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $current = $stmt->fetch();
 
             if ($current) {
-                $newStatus = $current['is_active'] ? false : true;
+                // Use 0/1 for PostgreSQL boolean compatibility
+                $newStatus = $current['is_active'] ? 0 : 1;
                 $stmt = $pdo->prepare("UPDATE landing_images SET is_active = ? WHERE id = ?");
                 $stmt->execute([$newStatus, $imageId]);
                 $message = $newStatus ? 'Image activated successfully!' : 'Image deactivated successfully!';
