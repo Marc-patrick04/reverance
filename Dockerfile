@@ -10,12 +10,11 @@ RUN apt-get update && apt-get install -y libpq-dev \
 # Copy project files
 COPY . /var/www/html/
 
-# Create uploads directory and set up symlink for persistent storage on Render
+# Note: uploads directory will be mounted from persistent disk in production
+# Create uploads directory structure for local development
 RUN mkdir -p /var/www/html/uploads/images && \
     chmod 755 /var/www/html/uploads/images && \
-    chown www-data:www-data /var/www/html/uploads/images && \
-    # Create symlink to persistent disk location for Render
-    ln -sf /opt/render/project/src/uploads /var/www/html/uploads
+    chown www-data:www-data /var/www/html/uploads/images
 
 # Expose default Render port
 EXPOSE 10000

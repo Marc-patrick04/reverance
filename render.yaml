@@ -9,5 +9,5 @@ services:
         value: /tmp/sessions
     disk:
       name: uploads
-      mountPath: /opt/render/project/src/uploads
+      mountPath: /var/www/html/uploads
       sizeGB: 1
