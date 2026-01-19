@@ -336,6 +336,7 @@ $inactiveSingers = $pdo->query("SELECT COUNT(*) FROM singers WHERE status = 'Ina
                 <a href="groups.php">Manage Groups</a>
                 <a href="reports.php">Reports</a>
                 <a href="images.php">Manage Images</a>
+                <a href="settings.php">Settings</a>
                 <a href="../logout.php">Logout</a>
             </nav>
         </div>

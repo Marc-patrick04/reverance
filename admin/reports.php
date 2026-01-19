@@ -32,6 +32,7 @@ $message = '';
                 <a href="groups.php">Manage Groups</a>
                 <a href="reports.php" class="active">Reports</a>
                 <a href="images.php">Manage Images</a>
+                <a href="settings.php">Settings</a>
                 <a href="../logout.php">Logout</a>
             </nav>
         </div>

@@ -196,7 +196,7 @@ $images = $pdo->query("SELECT * FROM landing_images ORDER BY created_at DESC")->
                 <a href="groups.php">Manage Groups</a>
                 <a href="reports.php">Reports</a>
                 <a href="images.php" class="active">Manage Images</a>
-
+                <a href="settings.php">Settings</a>
                 <a href="../logout.php">Logout</a>
             </nav>
         </div>
