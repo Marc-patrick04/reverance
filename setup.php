@@ -89,6 +89,20 @@ try {
         )
     ");
 
+    // Create singer_movement_history table to track singer movements between groups
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS singer_movement_history (
+            id SERIAL PRIMARY KEY,
+            singer_id INT NOT NULL REFERENCES singers(id) ON DELETE CASCADE,
+            from_group_id INT REFERENCES groups(id) ON DELETE SET NULL,
+            to_group_id INT REFERENCES groups(id) ON DELETE SET NULL,
+            movement_date DATE NOT NULL,
+            movement_type VARCHAR(20) NOT NULL CHECK (movement_type IN ('assigned', 'removed', 'transferred')),
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ");
+
     // Insert default admin user (password: admin123) if not exists
     $adminPassword = password_hash('admin123', PASSWORD_DEFAULT);
     $stmt = $pdo->prepare("

@@ -246,9 +246,7 @@ $currentUser = $stmt->fetch();
             width: 100%;
         }
 
-        .update-btn:hover {
-            background: linear-gradient(135deg, var(--accent-yellow) 0%, #FFD700 100%);
-            color: var(--primary-black);
+        .update-btn:hover {      
             transform: translateY(-2px);
             box-shadow: 0 8px 25px rgba(255, 215, 0, 0.4);
         }
@@ -361,7 +359,7 @@ $currentUser = $stmt->fetch();
                             </div>
 
                             <div class="security-tips">
-                                <h4>🔒 Password Security Tips</h4>
+                                <h4> Password Security Tips</h4>
                                 <ul>
                                     <li>Use at least 8 characters</li>
                                     <li>Include uppercase and lowercase letters</li>
@@ -371,7 +369,7 @@ $currentUser = $stmt->fetch();
                             </div>
 
                             <button type="submit" name="change_credentials" class="update-btn">
-                                💾 Update Account Credentials
+                                 Update Account Credentials
                             </button>
                         </form>
                     </div>

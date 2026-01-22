@@ -79,7 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             max-width: 450px;
             position: relative;
             z-index: 1;
-            border: 3px solid var(--accent-yellow);
+            border: 3px solid black;
         }
 
         .login-header {
@@ -92,38 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             position: relative;
         }
 
-        .login-logo .logo {
-            height: 90px;
-            width: auto;
-            display: block;
-            margin: 0 auto;
-            filter: drop-shadow(0 6px 12px rgba(255, 215, 0, 0.4))
-                   brightness(1.1) contrast(1.1);
-            transition: all 0.4s ease;
-            border-radius: 12px;
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 215, 0, 0.1) 100%);
-            padding: 1rem;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-        }
-
-        .login-logo .logo:hover {
-            transform: scale(1.05) rotate(1deg);
-            filter: drop-shadow(0 8px 16px rgba(255, 215, 0, 0.5))
-                   brightness(1.15) contrast(1.2);
-        }
-
-        .login-logo::before {
-            content: '';
-            position: absolute;
-            top: -10px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 120px;
-            height: 4px;
-            background: linear-gradient(90deg, transparent, var(--accent-yellow), transparent);
-            border-radius: 2px;
-        }
-
+        
       
         .login-header h1 {
             margin: 0 0 0.5rem 0;
@@ -200,12 +169,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         .password-toggle:focus {
             outline: none;
-            box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.3);
+            box-shadow: 0 0 0 2px black;
         }
 
         .form-group input:focus {
             outline: none;
-            border-color: var(--accent-yellow);
+            border-color: black;
             box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.1);
             background: #fefefe;
         }
@@ -216,9 +185,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         .login-btn {
             width: 100%;
-            background: linear-gradient(135deg, var(--primary-black) 0%, #333 100%);
+            background: black;
             color: var(--primary-white);
-            border: 2px solid var(--accent-yellow);
+            border: 2px solid black;
             padding: 0.875rem 1.5rem;
             border-radius: 8px;
             font-size: 1.1rem;

@@ -441,59 +441,383 @@ table .btn-danger {
 }
 
 /* Responsive Design */
-@media (max-width: 768px) {
-    .assignment-container {
+@media (max-width: 1024px) {
+    .groups-grid {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 1rem;
+    }
+
+    .movement-container {
         grid-template-columns: 1fr;
         gap: 1.5rem;
     }
+}
 
-    .groups-grid {
-        grid-template-columns: 1fr;
+@media (max-width: 768px) {
+    /* General mobile optimizations */
+    .admin-content {
+        padding: 1rem;
     }
 
-    .voice-breakdown {
-        grid-template-columns: 1fr;
+    .group-view,
+    .assignment-interface,
+    .movement-history {
+        padding: 1rem;
+        margin: 1rem 0;
     }
 
     .groups-header {
         flex-direction: column;
         gap: 1rem;
         text-align: center;
+        margin-bottom: 1.5rem;
+    }
+
+    .groups-header h3 {
+        font-size: 1.2rem;
+    }
+
+    /* Group cards */
+    .groups-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .group-card {
+        padding: 1rem;
+    }
+
+    .group-card-header {
+        margin-bottom: 0.75rem;
     }
 
     .group-card-meta {
         flex-direction: column;
         gap: 0.5rem;
         align-items: flex-start;
+        margin-bottom: 0.75rem;
     }
 
+    /* Voice breakdown */
+    .voice-breakdown {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .voice-category {
+        padding: 0.75rem;
+    }
+
+    /* Assignment interface */
+    .assignment-container {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+
+    .available-singers,
+    .assignment-summary {
+        padding: 1rem;
+    }
+
+    .singer-selection {
+        max-height: 300px;
+    }
+
+    /* Tables and forms */
+    .table-container {
+        overflow-x: auto;
+    }
+
+    table {
+        min-width: 600px;
+    }
+
+    .form-container {
+        padding: 1.5rem;
+    }
+
+    .form-row {
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .filters-section {
+        margin-bottom: 1.5rem;
+    }
+
+    .filters-form {
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .filter-row {
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .filter-actions {
+        text-align: center;
+    }
+
+    /* Button improvements */
+    .btn {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+        min-width: auto;
+        width: 100%;
+        margin: 0.25rem 0;
+    }
+
+    .groups-history .btn-sm,
+    .admin-content .btn-sm {
+        padding: 0.4rem 0.8rem !important;
+        font-size: 0.8rem !important;
+        margin: 0.2rem !important;
+    }
+
+    /* Singer items */
     .singer-item {
         flex-direction: column;
         align-items: flex-start;
         gap: 0.25rem;
+        padding: 0.75rem;
     }
 
     .voice-stats {
         flex-direction: column;
         gap: 0.5rem;
     }
+
+    /* No groups message */
+    .no-groups {
+        padding: 2rem 1rem;
+    }
+
+    .no-groups p {
+        font-size: 1rem;
+    }
+}
+
+/* Movement History Styles */
+.movement-history {
+    background: var(--primary-white);
+    border: 2px solid var(--border-gray);
+    border-radius: 8px;
+    padding: 2rem;
+    margin: 2rem 0;
+}
+
+.movement-header {
+    border-bottom: 2px solid var(--accent-yellow);
+    padding-bottom: 1rem;
+    margin-bottom: 2rem;
+}
+
+.movement-header h3 {
+    margin: 0 0 0.5rem 0;
+    color: var(--primary-black);
+}
+
+.movement-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    margin-bottom: 2rem;
+}
+
+.movement-section {
+    background: var(--light-gray);
+    border: 1px solid var(--border-gray);
+    border-radius: 6px;
+    padding: 1.5rem;
+}
+
+.movement-section h4 {
+    margin: 0 0 1rem 0;
+    color: var(--primary-black);
+    border-bottom: 1px solid var(--accent-yellow);
+    padding-bottom: 0.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.movement-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.movement-item {
+    background: white;
+    border: 1px solid var(--border-gray);
+    border-radius: 6px;
+    padding: 0.5rem;
+    transition: box-shadow 0.2s ease;
+}
+
+.movement-item:hover {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.movement-item.good {
+    border-left: 4px solid var(--success-green);
+}
+
+.movement-item.normal {
+    border-left: 4px solid var(--warning-orange);
+}
+
+.singer-info {
+    margin-bottom: 0.5rem;
+}
+
+.singer-info strong {
+    display: block;
+    color: var(--primary-black);
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+}
+
+.voice-type {
+    color: var(--primary-gray);
+    font-size: 0.85rem;
+}
+
+.movement-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.20rem;
+}
+
+.movement-type {
+    font-weight: bold;
+    font-size: 0.9rem;
+}
+
+.movement-type.assigned {
+    color: var(--success-green);
+}
+
+.movement-type.transferred {
+    color: var(--warning-orange);
+}
+
+.movement-type.removed {
+    color: var(--error-red);
+}
+
+.movement-date {
+    color: var(--primary-gray);
+    font-size: 0.8rem;
+}
+
+.movement-notes {
+    font-style: italic;
+    color: var(--primary-gray);
+    font-size: 0.85rem;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 3px;
+}
+
+.no-movements {
+    color: var(--primary-gray);
+    font-style: italic;
+    text-align: center;
+    padding: 2rem;
+}
+
+.movement-summary {
+    background: var(--accent-yellow);
+    border-radius: 6px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.movement-summary h4 {
+    margin: 0 0 1rem 0;
+    color: var(--primary-black);
+}
+
+.summary-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    background: white;
+    border-radius: 4px;
+    border: 1px solid var(--border-gray);
+}
+
+.stat-label {
+    font-weight: bold;
+    color: var(--primary-black);
+}
+
+.stat-value {
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: var(--accent-yellow);
+}
+
+.stat-value.positive {
+    color: var(--success-green);
+}
+
+.stat-value.negative {
+    color: var(--error-red);
+}
+
+.movement-actions {
+    text-align: center;
+    margin-top: 2rem;
+}
+
+/* Responsive Design for Movement History */
+@media (max-width: 768px) {
+    .movement-container {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+
+    .summary-stats {
+        grid-template-columns: 1fr;
+    }
+
+    .movement-item {
+        padding: 0.5rem;
+    }
+
+    .singer-info strong {
+        font-size: 1rem;
+    }
 }
 
 @media (max-width: 480px) {
-    .group-view,
-    .assignment-interface {
+    .movement-history {
         padding: 1rem;
     }
 
-    .voice-breakdown {
-        gap: 1rem;
-    }
-
-    .groups-grid {
-        gap: 1rem;
-    }
-
-    .group-card {
+    .movement-section {
         padding: 1rem;
+    }
+
+    .summary-stats {
+        gap: 0.75rem;
+    }
+
+    .stat-item {
+        padding: 0.5rem;
+        flex-direction: column;
+        text-align: center;
+        gap: 0.25rem;
     }
 }

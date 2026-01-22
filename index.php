@@ -193,7 +193,7 @@ try {
         <?php else: ?>
             <section class="groups-section">
                 <div class="no-groups-message">
-                    <h3> Welcome to Our Choir Management System</h3>
+                    <h3> Welcome Worship Team</h3>
                     <p>Groups will be displayed here once the administrator creates and publishes </p>
                 </div>
             </section>

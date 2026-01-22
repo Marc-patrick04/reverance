@@ -21,11 +21,13 @@ $action = $_GET['action'] ?? 'list';
 $editId = $_GET['id'] ?? null;
 $viewId = $_GET['id'] ?? null;
 $assignId = $_GET['id'] ?? null;
+$movementsId = $_GET['id'] ?? null;
 
 // Initialize data objects
 $editGroup = null;
 $viewGroup = null;
 $assignGroup = null;
+$movementHistory = null;
 
 /**
  * Error and Message Handling Functions
@@ -237,6 +239,13 @@ if ($action === 'edit' && $editId) {
     if (!$assignGroup) {
         $action = 'list';
     }
+} elseif ($action === 'movements') {
+    $movementHistory = getGroupMovementHistory($movementsId);
+    if (!$movementHistory) {
+        // If movement history fails to load, redirect to published groups with error
+        addError("Unable to load movement history. The database table may not exist yet.");
+        $action = 'list';
+    }
 }
 
 /**
@@ -325,6 +334,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         try {
             $pdo->beginTransaction();
+
+            // Track assignment changes before making updates
+            trackAssignmentChanges($groupId, $selectedSingers);
 
             // Remove all current assignments for this group
             $stmt = $pdo->prepare("DELETE FROM group_assignments WHERE group_id = ?");
@@ -541,6 +553,269 @@ function getServiceTimeDisplay($serviceOrder) {
 
     return $serviceOrder . $suffix . ' Service';
 }
+
+/**
+ * Movement History Functions
+ */
+function recordSingerMovement($singerId, $fromGroupId, $toGroupId, $movementType, $movementDate = null, $notes = '') {
+    global $pdo;
+
+    if (!$movementDate) {
+        $movementDate = date('Y-m-d');
+    }
+
+    try {
+        $stmt = $pdo->prepare("
+            INSERT INTO singer_movement_history (singer_id, from_group_id, to_group_id, movement_date, movement_type, notes)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->execute([$singerId, $fromGroupId, $toGroupId, $movementDate, $movementType, $notes]);
+    } catch (PDOException $e) {
+        // Log error but don't fail the operation
+        error_log("Failed to record singer movement: " . $e->getMessage());
+    }
+}
+
+function trackAssignmentChanges($groupId, $newSingerIds) {
+    global $pdo;
+
+    try {
+        // Get current assignments
+        $stmt = $pdo->prepare("SELECT singer_id FROM group_assignments WHERE group_id = ?");
+        $stmt->execute([$groupId]);
+        $currentAssignments = array_column($stmt->fetchAll(), 'singer_id');
+
+        // Get group date for movement tracking
+        $stmt = $pdo->prepare("SELECT service_date FROM groups WHERE id = ?");
+        $stmt->execute([$groupId]);
+        $groupDate = $stmt->fetch()['service_date'];
+
+        // Find singers being removed
+        $removedSingers = array_diff($currentAssignments, $newSingerIds);
+        foreach ($removedSingers as $singerId) {
+            recordSingerMovement($singerId, $groupId, null, 'removed', $groupDate, 'Removed from group');
+        }
+
+        // Find singers being added
+        $addedSingers = array_diff($newSingerIds, $currentAssignments);
+        foreach ($addedSingers as $singerId) {
+            // Check if they were in another group on the same date
+            $stmt = $pdo->prepare("
+                SELECT g.id as group_id, g.name as group_name
+                FROM group_assignments ga
+                JOIN groups g ON ga.group_id = g.id
+                WHERE ga.singer_id = ? AND g.service_date = ? AND g.id != ?
+            ");
+            $stmt->execute([$singerId, $groupDate, $groupId]);
+            $previousGroup = $stmt->fetch();
+
+            $fromGroupId = $previousGroup ? $previousGroup['group_id'] : null;
+            $movementType = $previousGroup ? 'transferred' : 'assigned';
+            $notes = $previousGroup ? "Transferred from {$previousGroup['group_name']}" : 'Assigned to group';
+
+            recordSingerMovement($singerId, $fromGroupId, $groupId, $movementType, $groupDate, $notes);
+        }
+
+    } catch (PDOException $e) {
+        error_log("Failed to track assignment changes: " . $e->getMessage());
+    }
+}
+
+function getGroupMovementHistory($groupId) {
+    global $pdo;
+
+    try {
+        // Get group info
+        $stmt = $pdo->prepare("SELECT * FROM groups WHERE id = ?");
+        $stmt->execute([$groupId]);
+        $group = $stmt->fetch();
+
+        if (!$group) return null;
+
+        // Use the same logic as the reports mixing tracking
+        // Get all groups ordered by date to find movements involving this group
+        $stmt = $pdo->query("
+            SELECT g.id, g.name, g.service_date, COUNT(ga.singer_id) as singer_count
+            FROM groups g
+            LEFT JOIN group_assignments ga ON g.id = ga.group_id
+            GROUP BY g.id, g.name, g.service_date
+            ORDER BY g.service_date ASC, g.service_order ASC
+        ");
+        $allGroups = $stmt->fetchAll();
+
+        // Group by date
+        $groupsByDate = [];
+        foreach ($allGroups as $g) {
+            $groupsByDate[$g['service_date']][] = $g;
+        }
+
+        // Find movements involving this specific group
+        $incomingMovements = [];
+        $outgoingMovements = [];
+        $previousAssignments = null;
+        $previousDate = null;
+
+        foreach ($groupsByDate as $date => $dateGroups) {
+            if ($previousAssignments !== null && $previousDate !== null) {
+                // Get current assignments for this date
+                $currentAssignments = [];
+                foreach ($dateGroups as $g) {
+                    $stmt = $pdo->prepare("
+                        SELECT ga.singer_id, s.full_name, s.voice_category, s.voice_level
+                        FROM group_assignments ga
+                        JOIN singers s ON ga.singer_id = s.id
+                        WHERE ga.group_id = ?
+                    ");
+                    $stmt->execute([$g['id']]);
+                    $currentAssignments[$g['name']] = $stmt->fetchAll();
+                }
+
+                // Check movements involving our target group
+                $targetGroupInPrevious = isset($previousAssignments[$group['name']]);
+                $targetGroupInCurrent = isset($currentAssignments[$group['name']]);
+
+                if ($targetGroupInPrevious || $targetGroupInCurrent) {
+                    // Analyze movements for this group
+                    if ($targetGroupInPrevious) {
+                        // Check singers who left this group
+                        foreach ($previousAssignments[$group['name']] as $singer) {
+                            $foundInCurrent = false;
+                            if ($targetGroupInCurrent) {
+                                // Check if singer stayed in this group
+                                foreach ($currentAssignments[$group['name']] as $currentSinger) {
+                                    if ($currentSinger['singer_id'] == $singer['singer_id']) {
+                                        $foundInCurrent = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (!$foundInCurrent) {
+                                // Singer left this group - find where they went
+                                $foundNewGroup = false;
+                                foreach ($currentAssignments as $currGroupName => $currSingers) {
+                                    if ($currGroupName != $group['name']) {
+                                        foreach ($currSingers as $currSinger) {
+                                            if ($currSinger['singer_id'] == $singer['singer_id']) {
+                                                // Singer moved to another group
+                                                $outgoingMovements[] = [
+                                                    'full_name' => $singer['full_name'],
+                                                    'voice_category' => $singer['voice_category'],
+                                                    'voice_level' => $singer['voice_level'],
+                                                    'from_group_name' => $group['name'],
+                                                    'to_group_name' => $currGroupName,
+                                                    'movement_date' => $date,
+                                                    'movement_type' => 'transferred',
+                                                    'notes' => "Moved from {$group['name']} to {$currGroupName}"
+                                                ];
+                                                $foundNewGroup = true;
+                                                break 2;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (!$foundNewGroup) {
+                                    // Singer was removed (not in any current groups)
+                                    $outgoingMovements[] = [
+                                        'full_name' => $singer['full_name'],
+                                        'voice_category' => $singer['voice_category'],
+                                        'voice_level' => $singer['voice_level'],
+                                        'from_group_name' => $group['name'],
+                                        'to_group_name' => null,
+                                        'movement_date' => $date,
+                                        'movement_type' => 'removed',
+                                        'notes' => "Removed from {$group['name']}"
+                                    ];
+                                }
+                            }
+                        }
+                    }
+
+                    if ($targetGroupInCurrent) {
+                        // Check singers who joined this group
+                        foreach ($currentAssignments[$group['name']] as $singer) {
+                            $foundInPrevious = false;
+                            if ($targetGroupInPrevious) {
+                                // Check if singer was already in this group
+                                foreach ($previousAssignments[$group['name']] as $prevSinger) {
+                                    if ($prevSinger['singer_id'] == $singer['singer_id']) {
+                                        $foundInPrevious = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (!$foundInPrevious) {
+                                // Singer joined this group - find where they came from
+                                $foundPreviousGroup = false;
+                                foreach ($previousAssignments as $prevGroupName => $prevSingers) {
+                                    if ($prevGroupName != $group['name']) {
+                                        foreach ($prevSingers as $prevSinger) {
+                                            if ($prevSinger['singer_id'] == $singer['singer_id']) {
+                                                // Singer came from another group
+                                                $incomingMovements[] = [
+                                                    'full_name' => $singer['full_name'],
+                                                    'voice_category' => $singer['voice_category'],
+                                                    'voice_level' => $singer['voice_level'],
+                                                    'from_group_name' => $prevGroupName,
+                                                    'to_group_name' => $group['name'],
+                                                    'movement_date' => $date,
+                                                    'movement_type' => 'transferred',
+                                                    'notes' => "Transferred from {$prevGroupName} to {$group['name']}"
+                                                ];
+                                                $foundPreviousGroup = true;
+                                                break 2;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (!$foundPreviousGroup) {
+                                    // Singer was newly assigned (not in any previous groups)
+                                    $incomingMovements[] = [
+                                        'full_name' => $singer['full_name'],
+                                        'voice_category' => $singer['voice_category'],
+                                        'voice_level' => $singer['voice_level'],
+                                        'from_group_name' => null,
+                                        'to_group_name' => $group['name'],
+                                        'movement_date' => $date,
+                                        'movement_type' => 'assigned',
+                                        'notes' => "Initially assigned to {$group['name']}"
+                                    ];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Prepare assignments for next iteration
+            $previousAssignments = [];
+            foreach ($dateGroups as $g) {
+                $stmt = $pdo->prepare("
+                    SELECT ga.singer_id, s.full_name, s.voice_category, s.voice_level
+                    FROM group_assignments ga
+                    JOIN singers s ON ga.singer_id = s.id
+                    WHERE ga.group_id = ?
+                ");
+                $stmt->execute([$g['id']]);
+                $previousAssignments[$g['name']] = $stmt->fetchAll();
+            }
+            $previousDate = $date;
+        }
+
+        return [
+            'group' => $group,
+            'incoming' => $incomingMovements,
+            'outgoing' => $outgoingMovements
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Failed to get group movement history: " . $e->getMessage());
+        return null;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -580,10 +855,10 @@ function getServiceTimeDisplay($serviceOrder) {
             <!-- Horizontal Navigation -->
             <div class="horizontal-nav">
                 <a href="groups.php" class="nav-tab <?php echo $action === 'list' ? 'active' : ''; ?>">
-                    📋 Published Groups
+                     Published Groups
                 </a>
                 <a href="groups.php?action=history" class="nav-tab <?php echo $action === 'history' ? 'active' : ''; ?>">
-                    📚 Group History
+                     Group History
                 </a>
                 <a href="groups.php?action=create" class="nav-tab <?php echo $action === 'create' ? 'active' : ''; ?>">
                     ➕ Create Groups
@@ -811,6 +1086,7 @@ function getServiceTimeDisplay($serviceOrder) {
 
                         <div class="group-actions">
                             <a href="groups.php?action=assign&id=<?php echo $viewGroup['id']; ?>" class="btn btn-primary">👥 Manage Singers</a>
+                            <a href="groups.php?action=movements&id=<?php echo $viewGroup['id']; ?>" class="btn btn-secondary">📊 See Movement</a>
                             <a href="groups.php?action=history" class="btn">Back to Groups</a>
                         </div>
                     </div>
@@ -967,17 +1243,108 @@ function getServiceTimeDisplay($serviceOrder) {
                         </div>
                     </div>
 
+                <?php elseif ($action === 'movements' && $movementHistory): ?>
+                    <div class="movement-history">
+                        <div class="movement-header">
+                            <h3>Movement History: <?php echo htmlspecialchars($movementHistory['group']['name']); ?></h3>
+                            <div class="group-meta">
+                                Service Date: <?php echo date('M j, Y', strtotime($movementHistory['group']['service_date'])); ?> •
+                                Status: <span class="status-<?php echo $movementHistory['group']['is_published'] ? 'published' : 'draft'; ?>">
+                                    <?php echo $movementHistory['group']['is_published'] ? 'Published' : 'Draft'; ?>
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="movement-container">
+                            <!-- Singers who moved INTO this group -->
+                            <div class="movement-section incoming">
+                                <h4>📥 Singers Added to This Group <span class="count">(<?php echo count($movementHistory['incoming']); ?>)</span></h4>
+                                <?php if (!empty($movementHistory['incoming'])): ?>
+                                    <div class="movement-list">
+                                        <?php foreach ($movementHistory['incoming'] as $movement): ?>
+                                            <div class="movement-item <?php echo strtolower($movement['voice_level']); ?>">
+                                                <div class="singer-info">
+                                                    <strong><?php echo htmlspecialchars($movement['full_name']); ?></strong>
+                                                    <span class="voice-type"><?php echo $movement['voice_category']; ?> (<?php echo $movement['voice_level']; ?>)</span>
+                                                </div>
+                                                <div class="movement-details">
+                                                    <span class="movement-type <?php echo $movement['movement_type']; ?>">
+                                                        <?php
+                                                        if ($movement['movement_type'] === 'assigned') {
+                                                            echo '🎯 Initially Assigned';
+                                                        } elseif ($movement['movement_type'] === 'transferred') {
+                                                            echo '🔄 Transferred from: ' . htmlspecialchars($movement['from_group_name'] ?: 'Unknown');
+                                                        } else {
+                                                            echo ucfirst($movement['movement_type']);
+                                                        }
+                                                        ?>
+                                                    </span>
+                                                    <span class="movement-date"><?php echo date('M j, Y', strtotime($movement['movement_date'])); ?></span>
+                                                </div>
+                                                <?php if ($movement['notes']): ?>
+                                                    <div class="movement-notes"><?php echo htmlspecialchars($movement['notes']); ?></div>
+                                                <?php endif; ?>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php else: ?>
+                                    <p class="no-movements">No singers have been added to this group.</p>
+                                <?php endif; ?>
+                            </div>
+
+                            <!-- Singers who moved OUT of this group -->
+                            <div class="movement-section outgoing">
+                                <h4>📤 Singers Removed from This Group <span class="count">(<?php echo count($movementHistory['outgoing']); ?>)</span></h4>
+                                <?php if (!empty($movementHistory['outgoing'])): ?>
+                                    <div class="movement-list">
+                                        <?php foreach ($movementHistory['outgoing'] as $movement): ?>
+                                            <div class="movement-item <?php echo strtolower($movement['voice_level']); ?>">
+                                                <div class="singer-info">
+                                                    <strong><?php echo htmlspecialchars($movement['full_name']); ?></strong>
+                                                    <span class="voice-type"><?php echo $movement['voice_category']; ?> (<?php echo $movement['voice_level']; ?>)</span>
+                                                </div>
+                                                <div class="movement-details">
+                                                    <span class="movement-type removed">
+                                                        ❌ Removed from group
+                                                    </span>
+                                                    <span class="movement-date"><?php echo date('M j, Y', strtotime($movement['movement_date'])); ?></span>
+                                                </div>
+                                                <?php if ($movement['notes']): ?>
+                                                    <div class="movement-notes"><?php echo htmlspecialchars($movement['notes']); ?></div>
+                                                <?php endif; ?>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php else: ?>
+                                    <p class="no-movements">No singers have been removed from this group.</p>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
+                       
+
+                        <div class="movement-actions">
+                            <a href="groups.php?action=view&id=<?php echo $movementHistory['group']['id']; ?>" class="btn">View Group</a>
+                            <a href="groups.php?action=assign&id=<?php echo $movementHistory['group']['id']; ?>" class="btn btn-primary">Manage Singers</a>
+                            <a href="groups.php?action=history" class="btn">Back to Groups</a>
+                        </div>
+                    </div>
+
                 <?php else: ?>
                     <div class="published-groups">
                         <div class="groups-header">
                             <h3>Published Groups</h3>
-                            <a href="groups.php?action=create" class="btn btn-primary">Create New Groups</a>
+                           
                         </div>
 
                         <?php if (empty($publishedGroups)): ?>
                             <div class="no-groups">
                                 <p>No published groups found.</p>
-                                <a href="groups.php?action=create" class="btn">Create Your First Groups</a>
+                                <?php if (empty($allGroups)): ?>
+                                    <a href="groups.php?action=create" class="btn">Create Your First Groups</a>
+                                <?php else: ?>
+                                    <a href="groups.php?action=history" class="btn">Publish Your Groups</a>
+                                <?php endif; ?>
                             </div>
                         <?php else: ?>
                             <div class="groups-grid">
@@ -991,7 +1358,7 @@ function getServiceTimeDisplay($serviceOrder) {
                                     <div class="group-card">
                                         <div class="group-card-header">
                                             <h4><?php echo $groupCounter; ?>. <?php echo htmlspecialchars($group['name']); ?></h4>
-                                            <span class="service-order"><?php echo getServiceTimeDisplay($group['service_order']); ?></span>
+                                          
                                         </div>
                                         <div class="group-card-meta">
                                             <span class="service-date"><?php echo date('M j, Y', strtotime($group['service_date'])); ?></span>
@@ -1052,94 +1419,104 @@ function getServiceTimeDisplay($serviceOrder) {
 
     <script src="../js/main.js"></script>
     <script>
-        // Dynamic group name inputs
-        document.getElementById('group_count').addEventListener('change', function() {
-            const count = parseInt(this.value) || 0;
-            const container = document.getElementById('group_names_container');
+        // Dynamic group name inputs (only for create page)
+        const groupCountElement = document.getElementById('group_count');
+        if (groupCountElement) {
+            groupCountElement.addEventListener('change', function() {
+                const count = parseInt(this.value) || 0;
+                const container = document.getElementById('group_names_container');
 
-            // Clear existing inputs
-            container.innerHTML = '';
+                // Clear existing inputs
+                if (container) {
+                    container.innerHTML = '';
 
-            // Add new inputs
-            for (let i = 1; i <= count; i++) {
-                const inputGroup = document.createElement('div');
-                inputGroup.className = 'form-group';
-                inputGroup.innerHTML = `
-                    <label for="group_name_${i}">Group ${i} Name:</label>
-                    <input type="text" id="group_name_${i}" name="group_names[]" value="Service ${i}" required>
-                `;
-                container.appendChild(inputGroup);
-            }
-        });
-
-        // Trigger change event on page load to show initial inputs
-        document.getElementById('group_count').dispatchEvent(new Event('change'));
-
-        // Method description toggle
-        document.getElementById('mixing_method').addEventListener('change', function() {
-            const selectedMethod = this.value;
-            const descriptions = document.querySelectorAll('.method-info');
-
-            // Hide all descriptions
-            descriptions.forEach(desc => desc.style.display = 'none');
-
-            // Show selected method description
-            const selectedDesc = document.querySelector(`.method-info[data-method="${selectedMethod}"]`);
-            if (selectedDesc) {
-                selectedDesc.style.display = 'block';
-            }
-        });
-
-        // Trigger change event on page load to show default method
-        document.getElementById('mixing_method').dispatchEvent(new Event('change'));
-
-        // Update selected singer count dynamically
-        const checkboxes = document.querySelectorAll('input[name="singers[]"]');
-        const selectedCount = document.getElementById('selected-count');
-
-        function updateSelectedCount() {
-            const checkedBoxes = document.querySelectorAll('input[name="singers[]"]:checked');
-            if (selectedCount) {
-                selectedCount.textContent = checkedBoxes.length;
-            }
-
-            // Update voice counts
-            const voiceCounts = { 'Soprano': 0, 'Alto': 0, 'Tenor': 0, 'Bass': 0 };
-            checkedBoxes.forEach(checkbox => {
-                const label = checkbox.closest('label');
-                const span = label.querySelector('span');
-                if (span) {
-                    const text = span.textContent;
-                    // Extract voice category from the text
-                    if (text.includes('(Good)') || text.includes('(Normal)')) {
-                        // Find the parent voice section
-                        const voiceSection = checkbox.closest('.voice-section');
-                        if (voiceSection) {
-                            const h5 = voiceSection.querySelector('h5');
-                            if (h5) {
-                                const voiceType = h5.textContent.replace(/s\s*\(.*/, ''); // Remove 's' and count
-                                voiceCounts[voiceType] = (voiceCounts[voiceType] || 0) + 1;
-                            }
-                        }
+                    // Add new inputs
+                    for (let i = 1; i <= count; i++) {
+                        const inputGroup = document.createElement('div');
+                        inputGroup.className = 'form-group';
+                        inputGroup.innerHTML = `
+                            <label for="group_name_${i}">Group ${i} Name:</label>
+                            <input type="text" id="group_name_${i}" name="group_names[]" value="Service ${i}" required>
+                        `;
+                        container.appendChild(inputGroup);
                     }
                 }
             });
 
-            // Update voice count displays
-            Object.keys(voiceCounts).forEach(voice => {
-                const countElement = document.querySelector(`.voice-count[data-voice="${voice}"]`);
-                if (countElement) {
-                    countElement.textContent = voiceCounts[voice];
-                }
-            });
+            // Trigger change event on page load to show initial inputs
+            groupCountElement.dispatchEvent(new Event('change'));
         }
 
-        checkboxes.forEach(checkbox => {
-            checkbox.addEventListener('change', updateSelectedCount);
-        });
+        // Method description toggle (only for create page)
+        const mixingMethodElement = document.getElementById('mixing_method');
+        if (mixingMethodElement) {
+            mixingMethodElement.addEventListener('change', function() {
+                const selectedMethod = this.value;
+                const descriptions = document.querySelectorAll('.method-info');
 
-        // Initial count
-        updateSelectedCount();
+                // Hide all descriptions
+                descriptions.forEach(desc => desc.style.display = 'none');
+
+                // Show selected method description
+                const selectedDesc = document.querySelector(`.method-info[data-method="${selectedMethod}"]`);
+                if (selectedDesc) {
+                    selectedDesc.style.display = 'block';
+                }
+            });
+
+            // Trigger change event on page load to show default method
+            mixingMethodElement.dispatchEvent(new Event('change'));
+        }
+
+        // Update selected singer count dynamically (only for assign page)
+        const checkboxes = document.querySelectorAll('input[name="singers[]"]');
+        const selectedCount = document.getElementById('selected-count');
+
+        if (checkboxes.length > 0) {
+            function updateSelectedCount() {
+                const checkedBoxes = document.querySelectorAll('input[name="singers[]"]:checked');
+                if (selectedCount) {
+                    selectedCount.textContent = checkedBoxes.length;
+                }
+
+                // Update voice counts
+                const voiceCounts = { 'Soprano': 0, 'Alto': 0, 'Tenor': 0, 'Bass': 0 };
+                checkedBoxes.forEach(checkbox => {
+                    const label = checkbox.closest('label');
+                    const span = label.querySelector('span');
+                    if (span) {
+                        const text = span.textContent;
+                        // Extract voice category from the text
+                        if (text.includes('(Good)') || text.includes('(Normal)')) {
+                            // Find the parent voice section
+                            const voiceSection = checkbox.closest('.voice-section');
+                            if (voiceSection) {
+                                const h5 = voiceSection.querySelector('h5');
+                                if (h5) {
+                                    const voiceType = h5.textContent.replace(/s\s*\(.*/, ''); // Remove 's' and count
+                                    voiceCounts[voiceType] = (voiceCounts[voiceType] || 0) + 1;
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // Update voice count displays
+                Object.keys(voiceCounts).forEach(voice => {
+                    const countElement = document.querySelector(`.voice-count[data-voice="${voice}"]`);
+                    if (countElement) {
+                        countElement.textContent = voiceCounts[voice];
+                    }
+                });
+            }
+
+            checkboxes.forEach(checkbox => {
+                checkbox.addEventListener('change', updateSelectedCount);
+            });
+
+            // Initial count
+            updateSelectedCount();
+        }
     </script>
 </body>
 </html>

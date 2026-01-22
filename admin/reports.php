@@ -66,7 +66,7 @@ $message = '';
                 <?php if ($report_type === 'singer'): ?>
                 <!-- Singer Search -->
                 <div class="form-container">
-                    <h4>🔍 Search Singer Assignments</h4>
+                    <h4> Search Singer Assignments</h4>
                     <form method="GET" style="margin-bottom: 2rem;">
                         <input type="hidden" name="report_type" value="singer">
                         <div class="form-row">

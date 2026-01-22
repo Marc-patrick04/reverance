@@ -298,7 +298,7 @@ main {
 .current-groups-section {
     margin-top: 3rem;
     padding-top: 2rem;
-    border-top: 2px solid var(--accent-yellow);
+    border-top: 2px solid black;
 }
 
 .current-groups-section h3 {
@@ -334,7 +334,7 @@ main {
     margin-bottom: 1rem;
     color: var(--primary-black);
     font-size: 1.3rem;
-    border-bottom: 2px solid var(--accent-yellow);
+    border-bottom: 2px solid black;
     padding-bottom: 0.5rem;
 }
 
@@ -376,17 +376,17 @@ main {
 }
 
 .voice-category li small {
-    color: var(--accent-yellow);
+    color: black;
     font-weight: 500;
 }
 
 /* No Groups Message */
 .no-groups-message {
-    background: linear-gradient(135deg, var(--light-yellow) 0%, rgba(255, 215, 0, 0.1) 100%);
+    background: black;
     padding: 2.5rem;
     border-radius: 12px;
     text-align: center;
-    border: 2px solid var(--accent-yellow);
+    border: 2px solid black;
     margin: 2rem 0;
 }
 
@@ -592,7 +592,7 @@ main {
     left: 0;
     right: 0;
     height: 4px;
-    background: linear-gradient(90deg, var(--accent-yellow), var(--primary-black));
+    background: black;
     border-radius: 8px 8px 0 0;
 }
 
@@ -600,7 +600,7 @@ main {
     text-align: center;
     margin-bottom: 1rem;
     font-size: 1.5rem;
-    border-bottom: 2px solid var(--accent-yellow);
+    border-bottom: 2px solid black;
     padding-bottom: 0.5rem;
     color: var(--primary-black);
 }
@@ -791,8 +791,8 @@ main {
 
 .form-group input:focus {
     outline: none;
-    border-color: var(--accent-yellow);
-    box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.1);
+    border-color: black;
+    box-shadow: 0 0 0 3px black;
 }
 
 .btn {
@@ -811,10 +811,7 @@ main {
 }
 
 .btn:hover {
-    background: linear-gradient(135deg, var(--accent-yellow) 0%, #FFD700 100%);
-    color: var(--primary-black);
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(255, 215, 0, 0.4);
 }
 
 .btn.btn-delete {

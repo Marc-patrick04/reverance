@@ -282,7 +282,7 @@ $query = "SELECT * FROM singers WHERE 1=1";
 $params = [];
 
 if (!empty($search)) {
-    $query .= " AND full_name LIKE ?";
+    $query .= " AND LOWER(full_name) LIKE LOWER(?)";
     $params[] = "%$search%";
 }
 
@@ -349,13 +349,13 @@ $inactiveSingers = $pdo->query("SELECT COUNT(*) FROM singers WHERE status = 'Ina
             <!-- Horizontal Navigation -->
             <div class="horizontal-nav">
                 <a href="singers.php" class="nav-tab <?php echo $action === 'list' || empty($action) ? 'active' : ''; ?>">
-                    👥 All Singers
+                     All Singers
                 </a>
                 <a href="singers.php?action=add" class="nav-tab <?php echo $action === 'add' ? 'active' : ''; ?>">
                     ➕ Add Singer
                 </a>
                 <a href="singers.php?action=import" class="nav-tab <?php echo $action === 'import' ? 'active' : ''; ?>">
-                    📤 Import Singers
+                     Import Singers
                 </a>
             </div>
 

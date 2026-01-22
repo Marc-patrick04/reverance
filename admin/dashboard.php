@@ -83,21 +83,21 @@ $activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active 
             <div class="admin-content">
                 <div class="welcome-section">
                     <h2>Welcome back, <?php echo htmlspecialchars($_SESSION['username']); ?>!</h2>
-                    <p>Here's what's happening with your gospel choir management system.</p>
+                    
                 </div>
 
                 <!-- Main Statistics Grid -->
                 <div class="dashboard-section">
-                    <h3> Key Metrics</h3>
+                    <h3> Overview</h3>
                     <div class="dashboard-grid">
-                        <div class="dashboard-card primary">
+                        <div class="dashboard-card secondary">
                             <div class="card-icon"></div>
                             <h3><?php echo $singerCount; ?></h3>
                             <p>Active Singers</p>
                             <small><?php echo $totalSingers; ?> total (<?php echo $inactiveSingers; ?> inactive)</small>
                         </div>
 
-                        <div class="dashboard-card primary">
+                        <div class="dashboard-card secondary">
                             <div class="card-icon"></div>
                             <h3><?php echo $groupCount; ?></h3>
                             <p>Published Groups</p>
@@ -117,16 +117,16 @@ $activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active 
 
                 <!-- Voice Distribution Chart -->
                 <div class="dashboard-section">
-                    <h3>🎵 Voice Category Distribution</h3>
+                    <h3> Voice </h3>
                     <div class="voice-chart">
                         <?php foreach ($voiceStats as $voice => $count): ?>
                             <?php
                             $percentage = $singerCount > 0 ? round(($count / $singerCount) * 100) : 0;
                             $color = match($voice) {
-                                'Soprano' => '#FFD700',
-                                'Alto' => '#FFA500',
-                                'Tenor' => '#FF6347',
-                                'Bass' => '#DC143C',
+                                'Soprano' => '#008100',
+                                'Alto' => '#00116e',
+                                'Tenor' => '#0ca9a9',
+                                'Bass' => '#d8cb18b3',
                                 default => '#666'
                             };
                             ?>
@@ -194,13 +194,13 @@ $activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active 
 
                 <!-- Quick Actions -->
                 <div class="dashboard-section">
-                    <h3>⚡ Quick Actions</h3>
+                    <h3> Quick Actions</h3>
                     <div class="quick-actions">
-                        <a href="singers.php?action=add" class="action-btn primary">
+                        <a href="singers.php?action=add" class="action-btn secondary">
                             <span class="action-icon">➕</span>
                             <span>Add New Singer</span>
                         </a>
-                        <a href="groups.php?action=create" class="action-btn primary">
+                        <a href="groups.php?action=create" class="action-btn secondary">
                             <span class="action-icon"></span>
                             <span>Create Groups</span>
                         </a>
@@ -209,11 +209,11 @@ $activeImage = $pdo->query("SELECT COUNT(*) FROM landing_images WHERE is_active 
                             <span>Manage Images</span>
                         </a>
 
-                        <a href="singers.php" class="action-btn info">
+                        <a href="singers.php" class="action-btn secondary">
                             <span class="action-icon"></span>
                             <span>Manage Singers</span>
                         </a>
-                        <a href="groups.php" class="action-btn info">
+                        <a href="groups.php" class="action-btn secondary">
                             <span class="action-icon"></span>
                             <span>Manage Groups</span>
                         </a>
