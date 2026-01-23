@@ -6,6 +6,207 @@ if (!isLoggedIn() || !isAdmin()) {
     exit;
 }
 
+// Handle AJAX requests for group movement details
+if (isset($_GET['action']) && $_GET['action'] === 'get_group_movements') {
+    $groupId = (int)($_GET['group_id'] ?? 0);
+    $groupDate = $_GET['date'] ?? '';
+
+    if ($groupId && $groupDate) {
+        // Get group info
+        $stmt = $pdo->prepare("SELECT * FROM groups WHERE id = ? AND service_date = ?");
+        $stmt->execute([$groupId, $groupDate]);
+        $group = $stmt->fetch();
+
+        if ($group) {
+            // Get current singers in this group
+            $stmt = $pdo->prepare("
+                SELECT s.id, s.full_name, s.voice_category, s.voice_level
+                FROM group_assignments ga
+                JOIN singers s ON ga.singer_id = s.id
+                WHERE ga.group_id = ?
+            ");
+            $stmt->execute([$groupId]);
+            $currentSingers = $stmt->fetchAll();
+
+            // Get previous group data (from the day before or last group before this date)
+            $stmt = $pdo->prepare("
+                SELECT g.id, g.name, g.service_date
+                FROM groups g
+                WHERE g.service_date < ?
+                ORDER BY g.service_date DESC
+                LIMIT 1
+            ");
+            $stmt->execute([$groupDate]);
+            $previousGroup = $stmt->fetch();
+
+            $addedSingers = [];
+            $removedSingers = [];
+            $transferredSingers = [];
+
+            if ($previousGroup) {
+                // Get singers from previous group
+                $stmt = $pdo->prepare("
+                    SELECT s.id, s.full_name, s.voice_category, s.voice_level
+                    FROM group_assignments ga
+                    JOIN singers s ON ga.singer_id = s.id
+                    WHERE ga.group_id = ?
+                ");
+                $stmt->execute([$previousGroup['id']]);
+                $previousSingers = $stmt->fetchAll();
+
+                $previousSingerIds = array_column($previousSingers, 'id');
+                $currentSingerIds = array_column($currentSingers, 'id');
+
+                // Find added singers (in current but not in previous)
+                foreach ($currentSingers as $singer) {
+                    if (!in_array($singer['id'], $previousSingerIds)) {
+                        $addedSingers[] = $singer;
+                    }
+                }
+
+                // Find removed singers (in previous but not in current)
+                foreach ($previousSingers as $singer) {
+                    if (!in_array($singer['id'], $currentSingerIds)) {
+                        $removedSingers[] = $singer;
+                    }
+                }
+
+                // Find transferred singers (in both but changed groups)
+                foreach ($currentSingers as $singer) {
+                    if (in_array($singer['id'], $previousSingerIds)) {
+                        // Check if they were in a different group
+                        $stmt = $pdo->prepare("
+                            SELECT g.name as group_name
+                            FROM group_assignments ga
+                            JOIN groups g ON ga.group_id = g.id
+                            WHERE ga.singer_id = ? AND g.service_date = ?
+                        ");
+                        $stmt->execute([$singer['id'], $groupDate]);
+                        $currentGroupForSinger = $stmt->fetch();
+
+                        $stmt = $pdo->prepare("
+                            SELECT g.name as group_name
+                            FROM group_assignments ga
+                            JOIN groups g ON ga.group_id = g.id
+                            WHERE ga.singer_id = ? AND g.service_date = ?
+                        ");
+                        $stmt->execute([$singer['id'], $previousGroup['service_date']]);
+                        $previousGroupForSinger = $stmt->fetch();
+
+                        if ($currentGroupForSinger && $previousGroupForSinger &&
+                            $currentGroupForSinger['group_name'] !== $previousGroupForSinger['group_name']) {
+                            $transferredSingers[] = [
+                                'singer' => $singer,
+                                'from_group' => $previousGroupForSinger['group_name'],
+                                'to_group' => $currentGroupForSinger['group_name']
+                            ];
+                        }
+                    }
+                }
+            } else {
+                // This is the first group ever, so all singers are "added"
+                $addedSingers = $currentSingers;
+            }
+
+            // Output HTML for modal
+            ?>
+            <div class="group-movement-details">
+                <div class="group-info">
+                    <h4><?php echo htmlspecialchars($group['name']); ?></h4>
+                    <p><strong>Date:</strong> <?php echo date('l, F j, Y', strtotime($group['service_date'])); ?></p>
+                    <p><strong>Total Singers:</strong> <?php echo count($currentSingers); ?></p>
+                </div>
+
+                <?php if (!empty($addedSingers)): ?>
+                <div class="movement-section added-section">
+                    <h5 style="color: #28a745;">➕ Added to Group (<?php echo count($addedSingers); ?>)</h5>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Singer Name</th>
+                                    <th>Voice Category</th>
+                                    <th>Voice Level</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($addedSingers as $singer): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($singer['full_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($singer['voice_category']); ?></td>
+                                    <td><?php echo htmlspecialchars($singer['voice_level']); ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <?php endif; ?>
+
+                <?php if (!empty($removedSingers)): ?>
+                <div class="movement-section removed-section">
+                    <h5 style="color: #dc3545;">➖ Removed from Group (<?php echo count($removedSingers); ?>)</h5>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Singer Name</th>
+                                    <th>Voice Category</th>
+                                    <th>Voice Level</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($removedSingers as $singer): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($singer['full_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($singer['voice_category']); ?></td>
+                                    <td><?php echo htmlspecialchars($singer['voice_level']); ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <?php endif; ?>
+
+                <?php if (!empty($transferredSingers)): ?>
+                <div class="movement-section transferred-section">
+                    <h5 style="color: #ffc107;">↔️ Transferred (<?php echo count($transferredSingers); ?>)</h5>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Singer Name</th>
+                                    <th>Voice Category</th>
+                                    <th>Voice Level</th>
+                                    <th>From → To</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($transferredSingers as $transfer): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($transfer['singer']['full_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($transfer['singer']['voice_category']); ?></td>
+                                    <td><?php echo htmlspecialchars($transfer['singer']['voice_level']); ?></td>
+                                    <td><?php echo htmlspecialchars($transfer['from_group'] . ' → ' . $transfer['to_group']); ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <?php endif; ?>
+
+                <?php if (empty($addedSingers) && empty($removedSingers) && empty($transferredSingers)): ?>
+                <p>No movements detected for this group. All singers remained stable from the previous group.</p>
+                <?php endif; ?>
+            </div>
+            <?php
+        }
+    }
+    exit;
+}
+
 $message = '';
 ?>
 <!DOCTYPE html>
@@ -55,6 +256,9 @@ $message = '';
                     </a>
                     <a href="reports.php?report_type=monthly" class="nav-tab <?php echo isset($_GET['report_type']) && $_GET['report_type'] === 'monthly' ? 'active' : ''; ?>">
                         📊 Monthly Reports
+                    </a>
+                    <a href="reports.php?report_type=movements" class="nav-tab <?php echo isset($_GET['report_type']) && $_GET['report_type'] === 'movements' ? 'active' : ''; ?>">
+                        📈 Movement History
                     </a>
                     <a href="reports.php?report_type=mixing" class="nav-tab <?php echo isset($_GET['report_type']) && $_GET['report_type'] === 'mixing' ? 'active' : ''; ?>">
                         🔄 Mixing Tracking
@@ -370,6 +574,82 @@ $message = '';
                         <?php else: ?>
                             <p>No groups found for this month.</p>
                         <?php endif; ?>
+                    <?php endif; ?>
+                </div>
+                <?php elseif ($report_type === 'movements'): ?>
+                <!-- Movement History Report -->
+                <div class="form-container">
+                    <h4> Movement History - Singer Movements by Group and Date</h4>
+                    <p class="description">Click on any group below to see detailed movement history for that group on that date.</p>
+
+                    <?php
+                    // Get all groups with their singer counts
+                    $stmt = $pdo->query("
+                        SELECT g.id, g.name, g.service_date, g.service_order,
+                               COUNT(ga.singer_id) as singer_count
+                        FROM groups g
+                        LEFT JOIN group_assignments ga ON g.id = ga.group_id
+                        GROUP BY g.id, g.name, g.service_date, g.service_order
+                        ORDER BY g.service_date DESC, g.service_order ASC
+                    ");
+                    $allGroups = $stmt->fetchAll();
+
+                    // Group by date for display
+                    $groupsByDate = [];
+                    foreach ($allGroups as $group) {
+                        $dateKey = $group['service_date'];
+                        $groupsByDate[$dateKey][] = $group;
+                    }
+                    ?>
+
+                    <h5>Groups by Date - Click to View Movements</h5>
+
+                    <?php if (!empty($groupsByDate)): ?>
+                        <div class="export-actions">
+                            <button onclick="previewReport('movements-report')" class="btn export-btn preview-btn"> Preview</button>
+                            <button onclick="exportToExcel('movements')" class="btn export-btn excel-btn">📊 Export Excel</button>
+                            <button onclick="downloadReport('movements-report', 'Movement_History_All_Months')" class="btn export-btn pdf-btn">📄 Download PDF</button>
+                        </div>
+
+                        <div id="movements-report" class="movements-report">
+                            <?php foreach ($groupsByDate as $date => $dateGroups): ?>
+                                <div class="date-section" style="margin-bottom: 2rem; border: 1px solid #ddd; border-radius: 8px; padding: 1rem;">
+                                    <h4 style="color: #007bff; margin-bottom: 1rem; border-bottom: 2px solid #007bff; padding-bottom: 0.5rem;">
+                                        <?php echo date('l, F j, Y', strtotime($date)); ?>
+                                    </h4>
+
+                                    <div class="groups-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                                        <?php foreach ($dateGroups as $group): ?>
+                                            <div class="group-card" style="border: 1px solid #dee2e6; border-radius: 6px; padding: 1rem; background: #f8f9fa; cursor: pointer;" onclick="showGroupMovements(<?php echo $group['id']; ?>, '<?php echo htmlspecialchars($group['name']); ?>', '<?php echo $date; ?>')">
+                                                <h5 style="margin: 0 0 0.5rem 0; color: #333;"><?php echo htmlspecialchars($group['name']); ?></h5>
+                                                <div style="color: #666; font-size: 0.9rem;">
+                                                    <?php echo $group['singer_count']; ?> singers
+                                                </div>
+                                                <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #007bff;">
+                                                    Click to view movements
+                                                </div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+
+                        <!-- Modal for group movement details -->
+                        <div id="movement-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+                            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 8px; padding: 2rem; max-width: 90%; max-height: 90%; overflow-y: auto; width: 800px;">
+                                <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 1rem;">
+                                    <h3 id="modal-title" style="margin: 0;">Group Movements</h3>
+                                    <button onclick="closeMovementModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer;">&times;</button>
+                                </div>
+                                <div id="modal-content">
+                                    <!-- Movement details will be loaded here -->
+                                </div>
+                            </div>
+                        </div>
+
+                    <?php else: ?>
+                        <p>No groups found. Create some groups first to see movement history.</p>
                     <?php endif; ?>
                 </div>
                 <?php elseif ($report_type === 'mixing'): ?>
@@ -951,6 +1231,157 @@ $message = '';
                 tableData = [headers, ...allSingerData];
                 fileName = `Monthly_Detailed_Report_${param}_${new Date().toISOString().split('T')[0]}.csv`;
 
+            } else if (reportType === 'movements') {
+                // For movements report, collect data from all groups via AJAX
+                const groupCards = document.querySelectorAll('#movements-report .group-card');
+                if (!groupCards || groupCards.length === 0) {
+                    alert('No groups found to export movement data from.');
+                    return;
+                }
+
+                // Show loading message
+                alert('Collecting movement data from all groups. This may take a moment...');
+
+                // Collect all movement data asynchronously
+                let allMovementData = [];
+                const headers = ['Date', 'Group', 'Movement Type', 'Singer Name', 'Voice Category', 'Voice Level', 'From Group', 'To Group', 'Notes'];
+                let completedRequests = 0;
+                const totalRequests = groupCards.length;
+
+                function processMovementData(groupId, groupName, groupDate, data) {
+                    // Parse the HTML response to extract movement data
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(data, 'text/html');
+
+                    // Extract added singers using specific class
+                    const addedSection = doc.querySelector('.added-section');
+                    if (addedSection) {
+                        const rows = addedSection.querySelectorAll('tbody tr');
+                        rows.forEach(row => {
+                            const cells = row.querySelectorAll('td');
+                            if (cells.length >= 3) {
+                                allMovementData.push([
+                                    new Date(groupDate).toLocaleDateString('en-US'), // Date
+                                    groupName,                                      // Group
+                                    'Added',                                        // Movement Type
+                                    cells[0].textContent.trim(),                   // Singer Name
+                                    cells[1].textContent.trim(),                   // Voice Category
+                                    cells[2].textContent.trim(),                   // Voice Level
+                                    '',                                             // From Group
+                                    groupName,                                     // To Group
+                                    'New singer added to group'                    // Notes
+                                ]);
+                            }
+                        });
+                    }
+
+                    // Extract removed singers using specific class
+                    const removedSection = doc.querySelector('.removed-section');
+                    if (removedSection) {
+                        const rows = removedSection.querySelectorAll('tbody tr');
+                        rows.forEach(row => {
+                            const cells = row.querySelectorAll('td');
+                            if (cells.length >= 3) {
+                                allMovementData.push([
+                                    new Date(groupDate).toLocaleDateString('en-US'), // Date
+                                    groupName,                                      // Group
+                                    'Removed',                                     // Movement Type
+                                    cells[0].textContent.trim(),                   // Singer Name
+                                    cells[1].textContent.trim(),                   // Voice Category
+                                    cells[2].textContent.trim(),                   // Voice Level
+                                    groupName,                                     // From Group
+                                    '',                                             // To Group
+                                    'Singer removed from group'                    // Notes
+                                ]);
+                            }
+                        });
+                    }
+
+                    // Extract transferred singers using specific class
+                    const transferredSection = doc.querySelector('.transferred-section');
+                    if (transferredSection) {
+                        const rows = transferredSection.querySelectorAll('tbody tr');
+                        rows.forEach(row => {
+                            const cells = row.querySelectorAll('td');
+                            if (cells.length >= 4) {
+                                const fromTo = cells[3].textContent.trim().split(' → ');
+                                allMovementData.push([
+                                    new Date(groupDate).toLocaleDateString('en-US'), // Date
+                                    groupName,                                      // Group
+                                    'Transferred',                                 // Movement Type
+                                    cells[0].textContent.trim(),                   // Singer Name
+                                    cells[1].textContent.trim(),                   // Voice Category
+                                    cells[2].textContent.trim(),                   // Voice Level
+                                    fromTo[0] || '',                               // From Group
+                                    fromTo[1] || '',                               // To Group
+                                    'Singer transferred between groups'            // Notes
+                                ]);
+                            }
+                        });
+                    }
+
+                    completedRequests++;
+                    if (completedRequests === totalRequests) {
+                        // All requests completed, create CSV
+                        if (allMovementData.length === 0) {
+                            alert('No movement data found to export.');
+                            return;
+                        }
+
+                        tableData = [headers, ...allMovementData];
+                        fileName = `Movement_History_All_Groups_${new Date().toISOString().split('T')[0]}.csv`;
+
+                        // Convert to CSV
+                        const csvContent = tableData.map(row =>
+                            row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')
+                        ).join('\n');
+
+                        // Create download link
+                        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                        const link = document.createElement('a');
+                        const url = URL.createObjectURL(blob);
+                        link.setAttribute('href', url);
+                        link.setAttribute('download', fileName);
+                        link.style.visibility = 'hidden';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+
+                        // Clean up
+                        URL.revokeObjectURL(url);
+                        document.body.removeChild(link);
+                    }
+                }
+
+                // Make AJAX requests for all groups
+                groupCards.forEach(card => {
+                    const onclickAttr = card.getAttribute('onclick');
+                    if (onclickAttr) {
+                        // Extract groupId, groupName, and groupDate from onclick attribute
+                        const match = onclickAttr.match(/showGroupMovements\((\d+),\s*'([^']+)',\s*'([^']+)'\)/);
+                        if (match) {
+                            const groupId = match[1];
+                            const groupName = match[2];
+                            const groupDate = match[3];
+
+                            fetch(`reports.php?action=get_group_movements&group_id=${groupId}&date=${groupDate}`)
+                                .then(response => response.text())
+                                .then(data => {
+                                    processMovementData(groupId, groupName, groupDate, data);
+                                })
+                                .catch(error => {
+                                    console.error(`Error loading data for ${groupName}:`, error);
+                                    completedRequests++;
+                                });
+                        } else {
+                            completedRequests++;
+                        }
+                    } else {
+                        completedRequests++;
+                    }
+                });
+                return; // Exit early since we're handling this asynchronously
+
             } else if (reportType === 'mixing') {
                 const table = document.querySelector('#mixing-report table');
                 if (!table) {
@@ -996,6 +1427,35 @@ $message = '';
             // Clean up
             URL.revokeObjectURL(url);
             document.body.removeChild(link);
+        }
+
+        function showGroupMovements(groupId, groupName, groupDate) {
+            // Show modal
+            document.getElementById('movement-modal').style.display = 'block';
+            document.getElementById('modal-title').textContent = `Movements for ${groupName} - ${new Date(groupDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`;
+
+            // Load movement data via AJAX
+            fetch(`reports.php?action=get_group_movements&group_id=${groupId}&date=${groupDate}`)
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('modal-content').innerHTML = data;
+                })
+                .catch(error => {
+                    document.getElementById('modal-content').innerHTML = '<p>Error loading movement data. Please try again.</p>';
+                    console.error('Error:', error);
+                });
+        }
+
+        function closeMovementModal() {
+            document.getElementById('movement-modal').style.display = 'none';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('movement-modal');
+            if (event.target == modal) {
+                modal.style.display = 'none';
+            }
         }
 
         function downloadReport(reportId, fileName) {
